@@ -7,8 +7,9 @@ modelviewer.vcxproj (vs2015/hvvr.sln) implements a simple model viewer, with opt
 ## Requirements
 HVVR requires:
 * Windows
-* a CUDA-compatible GPU and the CUDA SDK (tested on GeForce GTX 1080 and Quadro P6000)
-* (optional) the FBX SDK for importing content
+* CUDA-compatible GPU and CUDA SDK (tested on GeForce GTX 1080 and Quadro P6000)
+* CPU with AVX2 support
+* (optional) FBX SDK for importing content
 
 ## Building HVVR
 0. Install CUDA SDK (and optionally FBX SDK)
