@@ -1,0 +1,203 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="raycaster.h" />
+    <ClInclude Include="magic_constants.h" />
+    <ClInclude Include="sample_hierarchy.h">
+      <Filter>samples</Filter>
+    </ClInclude>
+    <ClInclude Include="foveated.h">
+      <Filter>samples</Filter>
+    </ClInclude>
+    <ClInclude Include="blockcull.h">
+      <Filter>scene</Filter>
+    </ClInclude>
+    <ClInclude Include="sample_clustering.h">
+      <Filter>samples</Filter>
+    </ClInclude>
+    <ClInclude Include="bvh_node.h">
+      <Filter>scene</Filter>
+    </ClInclude>
+    <ClInclude Include="raycaster_common.h" />
+    <ClInclude Include="frusta.h">
+      <Filter>cuda\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_foveated.h">
+      <Filter>cuda\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="tile_data.h">
+      <Filter>cuda\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_scene_state.h">
+      <Filter>cuda\scene</Filter>
+    </ClInclude>
+    <ClInclude Include="lighting_env.h">
+      <Filter>cuda\shading</Filter>
+    </ClInclude>
+    <ClInclude Include="shading.h">
+      <Filter>cuda\shading</Filter>
+    </ClInclude>
+    <ClInclude Include="shading_helpers.h">
+      <Filter>cuda\shading</Filter>
+    </ClInclude>
+    <ClInclude Include="cuda_util.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_buffer.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_image.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="memory_helpers.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="prim_tests.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="sort.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="warp_ops.h">
+      <Filter>cuda\util</Filter>
+    </ClInclude>
+    <ClInclude Include="cuda_raycaster.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="gbuffer.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_camera.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="gpu_context.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="intersect.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="kernel_constants.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="remap.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="resolve.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="material.h" />
+    <ClInclude Include="gpu_samples.h">
+      <Filter>cuda\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="samples.h">
+      <Filter>samples</Filter>
+    </ClInclude>
+    <ClInclude Include="raycaster_spec.h" />
+    <ClInclude Include="camera.h" />
+    <ClInclude Include="light.h">
+      <Filter>scene</Filter>
+    </ClInclude>
+    <ClInclude Include="model.h">
+      <Filter>scene</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="texture_internal.h">
+      <Filter>cuda</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="sample_hierarchy.cpp">
+      <Filter>samples</Filter>
+    </ClCompile>
+    <ClCompile Include="foveated.cpp">
+      <Filter>samples</Filter>
+    </ClCompile>
+    <ClCompile Include="blockcull.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="gpu_scene.cpp">
+      <Filter>cuda\scene</Filter>
+    </ClCompile>
+    <ClCompile Include="samples.cpp">
+      <Filter>samples</Filter>
+    </ClCompile>
+    <ClCompile Include="raycaster.cpp" />
+    <ClCompile Include="render.cpp" />
+    <ClCompile Include="camera.cpp" />
+    <ClCompile Include="light.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="model.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="scene_update.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="scene.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="samples">
+      <UniqueIdentifier>{cd182893-c90e-4a77-8d07-e69df9b226e6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="scene">
+      <UniqueIdentifier>{a1809837-557b-4acc-a627-638183e57193}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda">
+      <UniqueIdentifier>{941625f9-f753-4a16-9a67-f6ae54400fa5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda\samples">
+      <UniqueIdentifier>{0e367b92-ddf7-4e60-abc4-ae24c2cfe81a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda\scene">
+      <UniqueIdentifier>{1534a26c-dbf1-4c24-ac9e-988abd892466}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda\shading">
+      <UniqueIdentifier>{44f2f486-f30d-4417-a6e5-25d5cac70ba5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda\util">
+      <UniqueIdentifier>{6770932f-050e-4b38-a7df-f5fe37c49140}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="gpu_image.cu">
+      <Filter>cuda\util</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_samples.cu">
+      <Filter>cuda\samples</Filter>
+    </CudaCompile>
+    <CudaCompile Include="cuda_raycaster.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_scene_state.cu">
+      <Filter>cuda\scene</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_camera.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_context.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="gpu_foveated.cu">
+      <Filter>cuda\samples</Filter>
+    </CudaCompile>
+    <CudaCompile Include="frusta.cu">
+      <Filter>cuda\samples</Filter>
+    </CudaCompile>
+    <CudaCompile Include="texture.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="resolve.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="remap.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="intersect.cu">
+      <Filter>cuda</Filter>
+    </CudaCompile>
+  </ItemGroup>
+</Project>

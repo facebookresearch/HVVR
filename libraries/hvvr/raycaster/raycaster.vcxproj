@@ -1,0 +1,146 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Development|x64">
+      <Configuration>Development</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="camera.h" />
+    <ClInclude Include="cuda_raycaster.h" />
+    <ClInclude Include="cuda_util.h" />
+    <ClInclude Include="frusta.h" />
+    <ClInclude Include="gbuffer.h" />
+    <ClInclude Include="gpu_buffer.h" />
+    <ClInclude Include="gpu_camera.h" />
+    <ClInclude Include="gpu_context.h" />
+    <ClInclude Include="gpu_foveated.h" />
+    <ClInclude Include="gpu_image.h" />
+    <ClInclude Include="gpu_samples.h" />
+    <ClInclude Include="gpu_scene_state.h" />
+    <ClInclude Include="intersect.h" />
+    <ClInclude Include="kernel_constants.h" />
+    <ClInclude Include="light.h" />
+    <ClInclude Include="lighting_env.h" />
+    <ClInclude Include="material.h" />
+    <ClInclude Include="memory_helpers.h" />
+    <ClInclude Include="model.h" />
+    <ClInclude Include="prim_tests.h" />
+    <ClInclude Include="raycaster_common.h" />
+    <ClInclude Include="blockcull.h" />
+    <ClInclude Include="bvh_node.h" />
+    <ClInclude Include="foveated.h" />
+    <ClInclude Include="magic_constants.h" />
+    <ClInclude Include="raycaster.h" />
+    <ClInclude Include="raycaster_spec.h" />
+    <ClInclude Include="remap.h" />
+    <ClInclude Include="resolve.h" />
+    <ClInclude Include="samples.h" />
+    <ClInclude Include="sample_clustering.h" />
+    <ClInclude Include="sample_hierarchy.h" />
+    <ClInclude Include="shading.h" />
+    <ClInclude Include="shading_helpers.h" />
+    <ClInclude Include="sort.h" />
+    <ClInclude Include="texture.h" />
+    <ClInclude Include="texture_internal.h" />
+    <ClInclude Include="tile_data.h" />
+    <ClInclude Include="warp_ops.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="blockcull.cpp" />
+    <ClCompile Include="camera.cpp" />
+    <ClCompile Include="foveated.cpp" />
+    <ClCompile Include="gpu_scene.cpp" />
+    <ClCompile Include="light.cpp" />
+    <ClCompile Include="model.cpp" />
+    <ClCompile Include="raycaster.cpp" />
+    <ClCompile Include="render.cpp" />
+    <ClCompile Include="samples.cpp" />
+    <ClCompile Include="sample_hierarchy.cpp" />
+    <ClCompile Include="scene.cpp" />
+    <ClCompile Include="scene_update.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\shared\shared.vcxproj">
+      <Project>{59e92266-644c-43ce-ba62-a3f51fefcf07}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="cuda_raycaster.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="frusta.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_camera.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_context.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_foveated.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_image.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="gpu_samples.cu" />
+    <CudaCompile Include="gpu_scene_state.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="intersect.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="remap.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="resolve.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+    <CudaCompile Include="texture.cu">
+      <FileType>Document</FileType>
+    </CudaCompile>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{c5d565c3-8f10-41a4-980c-b233064bbd24}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>raycaster</RootNamespace>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\..\libraries\hvvr\hvvr_common.props" />
+    <Import Project="..\..\..\libraries\hvvr\shared\shared.props" />
+  </ImportGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ItemDefinitionGroup>
+    <CudaCompile>
+      <GenerateRelocatableDeviceCode>false</GenerateRelocatableDeviceCode>
+      <CodeGeneration>compute_61,sm_61</CodeGeneration>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <FastMath>true</FastMath>
+      <GenerateLineInfo>true</GenerateLineInfo>
+      <AdditionalOptions>-Xcompiler "/wd 4201 /wd 4127" %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
+  </ItemDefinitionGroup>
+</Project>

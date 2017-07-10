@@ -1,0 +1,16 @@
+[attr]normaltext text eol=lf whitespace=space-before-tab,trailing-space
+*.cpp             normaltext
+*.c               normaltext
+*.hpp             normaltext
+*.h               normaltext
+*.sln             normaltext
+*.props           normaltext
+*.vcxproj         normaltext
+*.vcxproj.filters normaltext
+*.md              normaltext
+*.lua             normaltext
+*.html            normaltext
+*.js              normaltext
+*.hlsl            normaltext
+.gitattributes    normaltext
+.editorconfig     normaltext

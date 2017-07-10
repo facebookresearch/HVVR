@@ -1,0 +1,37 @@
+# ignore the perforce tree
+perforce/*
+perforce/
+
+# ignore the build tree
+build/*
+build/
+
+# ignore intellisense precompiled headers
+ipch
+
+# ignore debug/release directories from vs
+Debug/
+Release/
+
+# ignore VS temps
+.vs
+*.nvuser
+
+# try to ignore all build products from x64 VS setups
+x64
+
+*.opensdf
+*.sdf
+*.user
+*.opendb
+*.suo
+*.vc.db
+*.log
+*.ipch
+*.pdb
+
+# Emacs autosave files
+\#*.*\#
+
+# Mac filesystem droppings
+.DS_Store
