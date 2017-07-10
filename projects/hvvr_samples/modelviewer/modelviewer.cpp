@@ -49,7 +49,7 @@ enum SimpleviewerScene {
     SceneCount
 };
 // which scene to load?
-static SimpleviewerScene gSceneSelect = scene_home;
+static SimpleviewerScene gSceneSelect = scene_sponza;
 
 // conversion from FBX to BIN
 #if MODEL_IMPORT_ENABLE_FBX
