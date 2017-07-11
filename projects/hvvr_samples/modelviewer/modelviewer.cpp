@@ -37,8 +37,8 @@
 // you might also want to enable JITTER_SAMPLES in kernel_constants.h
 #define ENABLE_FOVEATED 0
 // for foveated
-#define GAZE_CURSOR_MODE_NONE 0
-#define GAZE_CURSOR_MODE_MOUSE 1
+#define GAZE_CURSOR_MODE_NONE 0 // eye direction is locked forward
+#define GAZE_CURSOR_MODE_MOUSE 1 // eye direction is set by clicking the mouse on the window
 #define GAZE_CURSOR_MODE GAZE_CURSOR_MODE_NONE
 enum SimpleviewerScene {
     scene_home = 0,
@@ -157,43 +157,45 @@ void gOnInit() {
 
     std::string sceneBasePath = "../../../../libraries/hvvr/samples_shared/data/scenes/";
     std::string scenePath;
+    float sceneScale = 1.0f;
     switch (gSceneSelect) {
-    case scene_home:
-        // Oculus Home
-        gCameraPos = hvvr::vector3(1.0f, 3.0f, -1.5f);
-        gCameraYaw = -3.14159f * .7f;
-        gCameraPitch = 3.14159f * -.05f;
-        scenePath = sceneBasePath + "oculus_home.bin";
-        break;
+        case scene_home:
+            // Oculus Home
+            gCameraPos = hvvr::vector3(1.0f, 3.0f, -1.5f);
+            gCameraYaw = -3.14159f * .7f;
+            gCameraPitch = 3.14159f * -.05f;
+            scenePath = sceneBasePath + "oculus_home.bin";
+            break;
 
-    case scene_bunny:
-        // Stanford Bunny
-        gCameraPos = hvvr::vector3(-0.253644f, 0.577575f, 1.081316f);
-        gCameraYaw = -0.162111f;
-        gCameraPitch = -0.453079f;
-        scenePath = sceneBasePath + "bunny.bin";
-        break;
+        case scene_bunny:
+            // Stanford Bunny
+            gCameraPos = hvvr::vector3(-0.253644f, 0.577575f, 1.081316f);
+            gCameraYaw = -0.162111f;
+            gCameraPitch = -0.453079f;
+            scenePath = sceneBasePath + "bunny.bin";
+            break;
 
-    case scene_conference:
-        // Conference Room
-        gCameraPos = hvvr::vector3(10.091616f, 4.139270f, 1.230567f);
-        gCameraYaw = -5.378105f;
-        gCameraPitch = -0.398078f;
-        scenePath = sceneBasePath + "conference.bin";
-        break;
+        case scene_conference:
+            // Conference Room
+            gCameraPos = hvvr::vector3(10.091616f, 4.139270f, 1.230567f);
+            gCameraYaw = -5.378105f;
+            gCameraPitch = -0.398078f;
+            scenePath = sceneBasePath + "conference.bin";
+            break;
 
-    case scene_sponza:
-        // Crytek Sponza
-        gCameraPos = hvvr::vector3(4.198845f, 6.105420f, -0.400903f);
-        gCameraYaw = -4.704108f;
-        gCameraPitch = -0.200078f;
-        scenePath = sceneBasePath + "sponza.bin";
-        break;
+        case scene_sponza:
+            // Crytek Sponza
+            gCameraPos = hvvr::vector3(4.198845f, 6.105420f, -0.400903f);
+            gCameraYaw = -4.704108f;
+            gCameraPitch = -0.200078f;
+            scenePath = sceneBasePath + "sponza.bin";
+            sceneScale = .01f;
+            break;
 
-    default:
-        hvvr::fail("invalid scene enum");
-        return;
-        break;
+        default:
+            hvvr::fail("invalid scene enum");
+            return;
+            break;
     }
 
     // add a default directional light
@@ -214,22 +216,28 @@ void gOnInit() {
     resizeCallback(); // make sure we bind a render target and some samples to the camera
 
 #if MODEL_CONVERT
-    scenePath = sceneBasePath + "oculus_home.fbx";
-    std::string savePath = sceneBasePath + "oculus_home.bin";
+    scenePath = sceneBasePath + "sponza.fbx";
+    std::string savePath = sceneBasePath + "sponza.bin";
 #endif
     // load the scene
     model_import::Model importedModel;
     if (!model_import::load(scenePath.c_str(), importedModel)) {
         hvvr::fail("failed to load model %s", scenePath.c_str());
     }
-    if (!model_import::createObjects(*gRayCaster, importedModel)) {
-        hvvr::fail("failed to create model objects");
-    }
 #if MODEL_CONVERT
     if (!model_import::saveBin(savePath.c_str(), importedModel)) {
         hvvr::fail("failed to save model %s", savePath.c_str());
     }
 #endif
+
+    // apply scaling
+    for (auto& mesh : importedModel.meshes) {
+        mesh.transform.scale *= sceneScale;
+    }
+    // create the scene objects in the raycaster
+    if (!model_import::createObjects(*gRayCaster, importedModel)) {
+        hvvr::fail("failed to create model objects");
+    }
 }
 
 void gOnShutdown() {
@@ -269,10 +277,10 @@ void gOnMain() {
     if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
         POINT cursorCoord = {};
         GetCursorPos(&cursorCoord);
-        ScreenToClient(gHWnd, &cursorCoord);
+        ScreenToClient(HWND(gWindow->getWindowHandle()), &cursorCoord);
 
         RECT clientRect = {};
-        GetClientRect(gHWnd, &clientRect);
+        GetClientRect(HWND(gWindow->getWindowHandle()), &clientRect);
         int width = clientRect.right - clientRect.left;
         int height = clientRect.bottom - clientRect.top;
 
@@ -284,12 +292,9 @@ void gOnMain() {
 
             // This doesn't attempt to take into account the actual field of view or mapping from samples to pixels,
             // so it will be a bit off, especially as you get further from the screen center.
-            vector4 cursorPosEye(cursorX, cursorY, -screenDistance);
-            vector4 eyeDir = normalize3(cursorPosEye);
-
-            hvvr::Camera* camera = static_cast<hvvr_context::Camera*>(gCamera->GetCamera())->getInternal();
-            assert(camera);
-            camera->setEyeDir(eyeDir);
+            hvvr::vector3 cursorPosEye(cursorX, cursorY, -screenDistance);
+            hvvr::vector3 eyeDir = hvvr::normalize(cursorPosEye);
+            gCamera->setEyeDir(eyeDir);
         }
     }
 #endif
@@ -342,13 +347,13 @@ void gOnMain() {
             float frameTimeAvg = float(frameTimeAvgTotal / double(frameTimeAvgCount));
 
             printf("%.0f (%.0f) mrays/s"
-                ", %.2f (%.2f) ms frametime"
-                ", %u x %u rays"
-                "\n",
-                fastestFrame.rayCount / fastestFrame.deltaTime / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
-                fastestFrame.rayCount / frameTimeAvg / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
-                fastestFrame.deltaTime * 1000, frameTimeAvg * 1000, uint32_t(fastestFrame.rayCount),
-                hvvr::COLOR_MODE_MSAA_RATE);
+                   ", %.2f (%.2f) ms frametime"
+                   ", %u x %u rays"
+                   "\n",
+                   fastestFrame.rayCount / fastestFrame.deltaTime / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
+                   fastestFrame.rayCount / frameTimeAvg / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
+                   fastestFrame.deltaTime * 1000, frameTimeAvg * 1000, uint32_t(fastestFrame.rayCount),
+                   hvvr::COLOR_MODE_MSAA_RATE);
         }
         frameStatsPos = (frameStatsPos + 1) % frameStatsWindowSize;
     }

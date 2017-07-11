@@ -8,11 +8,16 @@
  */
 
 #include "sample_hierarchy.h"
+#include "constants_math.h"
 #include "kernel_constants.h"
 
 #include <sstream>
 
 #pragma warning(disable : 4505) // unreferenced local function has been removed
+
+#if ENABLE_HACKY_WIDE_FOV
+#pragma warning(disable: 4702) // unreachable code
+#endif
 
 namespace hvvr {
 
@@ -69,7 +74,7 @@ static RayPacketFrustum3D get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D
         float newX = sin(yaw) * cos(pitch);
         float newY = sin(pitch);
         float newZ = -cos(yaw) * cos(pitch);
-        rayDirections[i] = vector4(newX, newY, newZ);
+        rayDirections[i] = vector3(newX, newY, newZ);
     }
 
     return RayPacketFrustum3D(nearPoints[0], rayDirections[0], nearPoints[1], rayDirections[1], nearPoints[2],

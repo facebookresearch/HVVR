@@ -30,14 +30,13 @@ bool load(const char* path, Model& model) {
     {
         return loadBin(path, model);
     }
-#if MODEL_IMPORT_ENABLE_FBX
-    else if (compareExtension(extension, "fbx"))
-    {
-        return loadFbx(path, model);
-    }
-#endif
 
+#if MODEL_IMPORT_ENABLE_FBX
+    // attempt to load it with the FBX SDK
+    return loadFbx(path, model);
+#else
     return false;
+#endif
 }
 
 bool createObjects(hvvr::Raycaster& raycaster, Model& model) {

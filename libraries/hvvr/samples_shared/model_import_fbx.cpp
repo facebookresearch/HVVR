@@ -202,26 +202,32 @@ struct UnorderedMapGenerator {
 
 bool importMesh(ImportState& state, FbxNode* pNode) {
     auto pMesh = pNode->GetMesh();
-    if (!pMesh->IsTriangleMesh())
-        return printf("error: We only support triangle meshes.\n"), false;
+    if (!pMesh->IsTriangleMesh()) {
+        printf("error: We only support triangle meshes.\n");
+        return false;
+    }
 
     model_import::Mesh mesh;
     mesh.transform = AsTransform(pNode->EvaluateGlobalTransform()) * GetGeometryTransform(pNode);
 
-    FbxGeometryElementNormal* pNormals = pMesh->GetElementNormal(0);
+    // Import the materials.
+    int materialCount = pNode->GetMaterialCount();
+    for (int n = 0; n < materialCount; n++) {
+        if (!importMaterial(state, mesh, pNode->GetMaterial(n))) {
+            return false;
+        }
+    }
+
+    const FbxGeometryElementNormal* pNormals = pMesh->GetElementNormal(0);
     if (!pNormals) {
         // Generate normals if we don't have any
         pMesh->GenerateNormals();
         pNormals = pMesh->GetElementNormal(0);
     }
-    FbxGeometryElementUV* pUVs = pMesh->GetElementUV(0);
-
-    // Import the materials.
-    for (int i = 0, e = pMesh->GetElementMaterialCount(); i != e; ++i) {
-        if (!importMaterial(state, mesh, pNode->GetMaterial(pMesh->GetElementMaterial(i)->GetIndexArray()[i]))) {
-            return false;
-        }
-    }
+    const FbxGeometryElementUV* pUVs = pMesh->GetElementUV(0);
+    const FbxLayerElementMaterial* pPolygonMaterials = pMesh->GetElementMaterial();
+    assert(pPolygonMaterials != nullptr);
+    const auto& pPolygonMaterialsIndexArray = pPolygonMaterials->GetIndexArray();
 
     // vertex deduplication
     UnorderedMapGenerator<hvvr::ShadingVertex, uint32_t>::Type hashMap;
@@ -257,13 +263,14 @@ bool importMesh(ImportState& state, FbxNode* pNode) {
             }
         }
 
+        int materialIndex = pPolygonMaterialsIndexArray.GetAt(t);
+        assert(materialIndex >= 0 && materialIndex < materialCount);
+
         hvvr::PrecomputedTriangleShade& triShade = mesh.data.triShade[t];
         triShade.indices[0] = triIndices[0];
         triShade.indices[1] = triIndices[1];
         triShade.indices[2] = triIndices[2];
-        // TODO(anankervis): why are we importing ALL materials above, if we then force each triangle to use slot 0
-        // only?
-        triShade.material = 0;
+        triShade.material = uint32_t(materialIndex);
     }
 
     hvvr::GenerateTopology(mesh.data);
@@ -387,7 +394,7 @@ bool importLight(ImportState& state, FbxNode* pNode, FbxLight* pLight) {
     } else if (pLight->LightType.Get() == FbxLight::ePoint) {
         if (bool(pLight->EnableFarAttenuation) == false) {
             printf("\nIMPORT WARNING: Ignoring point light because FarAttenuation not enabled.\n");
-            return false;
+            return true; // we won't consider this a failure case
         }
 
         light.type = hvvr::LightType::point;
@@ -398,7 +405,7 @@ bool importLight(ImportState& state, FbxNode* pNode, FbxLight* pLight) {
     } else if (pLight->LightType.Get() == FbxLight::eSpot) {
         if (bool(pLight->EnableFarAttenuation) == false) {
             printf("\nIMPORT WARNING: Ignoring spot light because FarAttenuation not enabled.\n");
-            return false;
+            return true; // we won't consider this a failure case
         }
 
         float cosInnerAngle = cosf(float(pLight->InnerAngle.Get()) * hvvr::RadiansPerDegree);

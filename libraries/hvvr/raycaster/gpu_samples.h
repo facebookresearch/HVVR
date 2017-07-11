@@ -9,6 +9,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include "constants_math.h"
 #include "cuda_decl.h"
 #include "kernel_constants.h"
 #include "samples.h"
