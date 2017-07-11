@@ -121,7 +121,9 @@ bool loadBin(const char* path, Model& model) {
     ok = true;
 load_bin_fail:
 
-    fclose(file);
+    if (file) {
+        fclose(file);
+    }
     return ok;
 }
 

@@ -220,14 +220,14 @@ void gOnInit() {
     // load the scene
     model_import::Model importedModel;
     if (!model_import::load(scenePath.c_str(), importedModel)) {
-        hvvr::fail("failed to load model");
+        hvvr::fail("failed to load model %s", scenePath.c_str());
     }
     if (!model_import::createObjects(*gRayCaster, importedModel)) {
         hvvr::fail("failed to create model objects");
     }
 #if MODEL_CONVERT
     if (!model_import::saveBin(savePath.c_str(), importedModel)) {
-        hvvr::fail("failed to save model");
+        hvvr::fail("failed to save model %s", savePath.c_str());
     }
 #endif
 }
