@@ -213,7 +213,8 @@ bool importMesh(ImportState& state, FbxNode* pNode) {
     // Import the materials.
     int materialCount = pNode->GetMaterialCount();
     for (int n = 0; n < materialCount; n++) {
-        if (!importMaterial(state, mesh, pNode->GetMaterial(n))) {
+        FbxSurfaceMaterial* material = pNode->GetMaterial(n);
+        if (!importMaterial(state, mesh, material)) {
             return false;
         }
     }
@@ -224,10 +225,32 @@ bool importMesh(ImportState& state, FbxNode* pNode) {
         pMesh->GenerateNormals();
         pNormals = pMesh->GetElementNormal(0);
     }
+
     const FbxGeometryElementUV* pUVs = pMesh->GetElementUV(0);
+
     const FbxLayerElementMaterial* pPolygonMaterials = pMesh->GetElementMaterial();
     assert(pPolygonMaterials != nullptr);
-    const auto& pPolygonMaterialsIndexArray = pPolygonMaterials->GetIndexArray();
+    assert(pPolygonMaterials->GetReferenceMode() == FbxGeometryElement::eIndex ||
+           pPolygonMaterials->GetReferenceMode() == FbxGeometryElement::eIndexToDirect);
+    FbxGeometryElement::EMappingMode mappingMode = pPolygonMaterials->GetMappingMode();
+    auto getMaterialIndex = [pPolygonMaterials, mappingMode, materialCount](uint32_t triangleIndex) {
+        int lookupIndex = 0;
+        switch (mappingMode) {
+            case FbxGeometryElement::eByPolygon:
+                lookupIndex = triangleIndex;
+                break;
+            case FbxGeometryElement::eAllSame:
+                lookupIndex = 0;
+                break;
+            default:
+                assert(false);
+                break;
+        }
+
+        int materialIndex = pPolygonMaterials->mIndexArray->GetAt(lookupIndex);
+        assert(materialIndex >= 0 && materialIndex < materialCount);
+        return uint32_t(materialIndex);
+    };
 
     // vertex deduplication
     UnorderedMapGenerator<hvvr::ShadingVertex, uint32_t>::Type hashMap;
@@ -263,14 +286,13 @@ bool importMesh(ImportState& state, FbxNode* pNode) {
             }
         }
 
-        int materialIndex = pPolygonMaterialsIndexArray.GetAt(t);
-        assert(materialIndex >= 0 && materialIndex < materialCount);
+        uint32_t materialIndex = getMaterialIndex(t);
 
         hvvr::PrecomputedTriangleShade& triShade = mesh.data.triShade[t];
         triShade.indices[0] = triIndices[0];
         triShade.indices[1] = triIndices[1];
         triShade.indices[2] = triIndices[2];
-        triShade.material = uint32_t(materialIndex);
+        triShade.material = materialIndex;
     }
 
     hvvr::GenerateTopology(mesh.data);

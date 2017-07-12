@@ -503,9 +503,6 @@ struct TopologyBuilder {
 
                 triangles[t].indices[v] = vertexOffsets[index];
             }
-
-            // copy remaining triangle data
-            triangles[t].material = mesh.triShade[t].material;
         }
         if (newIndex)
             fail("Didn't copy all vertices.");
