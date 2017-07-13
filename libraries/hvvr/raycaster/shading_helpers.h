@@ -153,6 +153,9 @@ CDI vector3 SpotLightContribution(
 }
 
 // https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+// input should be pre-exposed, so input=1 produces output~=.8
+// output is linear and will still need some sort of gamma treatment
+// more comments on color spaces in the above link...
 CDI vector3 ACESFilm(vector3 inputColor) {
     float a = 2.51f;
     float b = 0.03f;

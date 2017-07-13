@@ -9,9 +9,6 @@
     <ClInclude Include="foveated.h">
       <Filter>samples</Filter>
     </ClInclude>
-    <ClInclude Include="blockcull.h">
-      <Filter>scene</Filter>
-    </ClInclude>
     <ClInclude Include="sample_clustering.h">
       <Filter>samples</Filter>
     </ClInclude>
@@ -106,6 +103,9 @@
     <ClInclude Include="texture_internal.h">
       <Filter>cuda</Filter>
     </ClInclude>
+    <ClInclude Include="traversal.h">
+      <Filter>scene</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="sample_hierarchy.cpp">
@@ -113,9 +113,6 @@
     </ClCompile>
     <ClCompile Include="foveated.cpp">
       <Filter>samples</Filter>
-    </ClCompile>
-    <ClCompile Include="blockcull.cpp">
-      <Filter>scene</Filter>
     </ClCompile>
     <ClCompile Include="gpu_scene.cpp">
       <Filter>cuda\scene</Filter>
@@ -136,6 +133,9 @@
       <Filter>scene</Filter>
     </ClCompile>
     <ClCompile Include="scene.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="traversal.cpp">
       <Filter>scene</Filter>
     </ClCompile>
   </ItemGroup>

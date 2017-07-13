@@ -35,3 +35,6 @@ x64
 
 # Mac filesystem droppings
 .DS_Store
+
+# scene data files
+libraries/hvvr/samples_shared/data/scenes/*

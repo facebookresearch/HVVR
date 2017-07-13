@@ -34,7 +34,7 @@ To convert and load your own scenes:
 3. (Optionally, you can also export the FBX file to .bin for faster loading in the future, see the "MODEL_CONVERT" macro)
 
 ## Full documentation
-Some installations of the CUDA SDK and Visual Studio integration appear to have broken build dependency tracking. If you're seeing behavior after code modification that looks like stale code from header files referenced in .cu files, try cleaning the solution and building from scratch.
+Some installations of the CUDA SDK and Visual Studio integration appear to have broken build dependency tracking. If you're seeing behavior after code modification that looks like stale code from header files referenced in .cu files, try cleaning the solution and building from scratch (or install a newer CUDA Toolkit).
 
 There are several #define macros to be aware of, which control the behavior of the raycaster:
 * DISABLE_MOVEMENT - modelviewer.cpp, disables camera movement and rotation

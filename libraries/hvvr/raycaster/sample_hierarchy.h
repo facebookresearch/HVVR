@@ -9,7 +9,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "blockcull.h"
+#include "traversal.h"
 #include "samples.h"
 #include "graphics_types.h"
 

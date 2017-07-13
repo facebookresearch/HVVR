@@ -36,7 +36,6 @@
     <ClInclude Include="model.h" />
     <ClInclude Include="prim_tests.h" />
     <ClInclude Include="raycaster_common.h" />
-    <ClInclude Include="blockcull.h" />
     <ClInclude Include="bvh_node.h" />
     <ClInclude Include="foveated.h" />
     <ClInclude Include="magic_constants.h" />
@@ -53,10 +52,10 @@
     <ClInclude Include="texture.h" />
     <ClInclude Include="texture_internal.h" />
     <ClInclude Include="tile_data.h" />
+    <ClInclude Include="traversal.h" />
     <ClInclude Include="warp_ops.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="blockcull.cpp" />
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="foveated.cpp" />
     <ClCompile Include="gpu_scene.cpp" />
@@ -68,6 +67,7 @@
     <ClCompile Include="sample_hierarchy.cpp" />
     <ClCompile Include="scene.cpp" />
     <ClCompile Include="scene_update.cpp" />
+    <ClCompile Include="traversal.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\shared\shared.vcxproj">
