@@ -95,8 +95,8 @@ protected:
     void renderGPUIntersectAndReconstructDeferredMSAAResolve();
     void renderFoveatedPolarSpaceCudaReconstruct();
 
-    // generate lists of triangles to intersect on the GPU
-    void generatePerChunkTriangleListsParallel(const BlockInfo& blockInfo, Camera_StreamedData* streamed);
+    // traverse BVH and generate lists of triangles to intersect on the GPU
+    void buildTileTriangleLists(const BlockInfo& blockInfo, Camera_StreamedData* streamed);
 
     //// output
     void blitResult(Camera* camera);

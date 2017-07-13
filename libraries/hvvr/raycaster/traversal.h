@@ -203,8 +203,8 @@ struct RayPacketFrustum3D {
 };
 
 struct BlockInfo {
-    ArrayView<const RayPacketFrustum3D> tileFrusta;
     ArrayView<const RayPacketFrustum3D> blockFrusta;
+    ArrayView<const RayPacketFrustum3D> tileFrusta;
 };
 
 } // namespace hvvr

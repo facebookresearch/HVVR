@@ -239,7 +239,7 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
             }
 #endif
 
-            generatePerChunkTriangleListsParallel(blockInfo, streamed);
+            buildTileTriangleLists(blockInfo, streamed);
 
             // end filling data for the GPU
             gpuCamera->streamedDataUnlock();
@@ -342,7 +342,7 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
 
             // Uncomment to get stats on how good the block/tile clustering is working
             // debugPrintTileCost(camera->polarFoveatedSampleData.samples, camera->polarFoveatedSampleData.blockCount);
-            generatePerChunkTriangleListsParallel(blockInfo, streamed);
+            buildTileTriangleLists(blockInfo, streamed);
 
             // size_t totalTris = _bvhScene.triangles.size;
             // size_t trisIntersected = camera->tileCullInfo.triIndexCount;

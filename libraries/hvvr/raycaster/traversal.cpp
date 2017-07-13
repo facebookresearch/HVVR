@@ -26,7 +26,6 @@
 
 namespace hvvr {
 
-// TODO(anankervis): split this into a separate file
 // TODO(anankervis): optimize this - it gets called a lot
 // find the major axis, and precompute some values for the intersection tests
 void RayPacketFrustum3D::updatePrecomputed() {
@@ -681,7 +680,7 @@ struct TaskData {
     }
 };
 
-static void generatePerChunkTriangleListsOneThread(
+static void cullThread(
     const BlockInfo& blockInfo, uint32_t startBlock, uint32_t endBlock, const BVHNode* nodes, TaskData* perThread) {
 #if DEBUG_STATS
     auto startTime = (double)__rdtsc();
@@ -758,7 +757,7 @@ static void generatePerChunkTriangleListsOneThread(
 #endif
 }
 
-void Raycaster::generatePerChunkTriangleListsParallel(const BlockInfo& blockInfo, Camera_StreamedData* streamed) {
+void Raycaster::buildTileTriangleLists(const BlockInfo& blockInfo, Camera_StreamedData* streamed) {
     const BVHNode* nodes = _nodes.data();
     ArrayView<uint32_t> triIndices(streamed->triIndices.dataHost(), streamed->triIndices.size());
 
@@ -781,7 +780,6 @@ void Raycaster::generatePerChunkTriangleListsParallel(const BlockInfo& blockInfo
     m4X = minMaxMeanMedian(tileFrustaAngle, validTiles);
     printf("Tile: Min,Max,Mean,Median: %g, %g, %g, %g\n", m4X.x, m4X.y, m4X.z, m4X.w);
     printf("Percent of sphere covered by tile frusta: %g\n", 100.0 * m4X.z * validTiles / (4 * M_PI));
-
 #endif
 
 #if DEBUG_STATS || TIME_BLOCK_CULL
@@ -813,7 +811,7 @@ void Raycaster::generatePerChunkTriangleListsParallel(const BlockInfo& blockInfo
         if (i == numTasks - 1)
             assert(endBlock == blockCount);
 
-        taskResults[i] = _threadPool->addTask(generatePerChunkTriangleListsOneThread, blockInfo, startBlock, endBlock,
+        taskResults[i] = _threadPool->addTask(cullThread, blockInfo, startBlock, endBlock,
                                               nodes, &taskData[i]);
     }
 
