@@ -97,75 +97,58 @@ CUDA_DEVICE vector4 BruteForceShade(ResolveSMem& sMem,
             atomicAdd(&resolveStats->shadeSamples, 1);
 #endif
 
-            float b[3];
-            float bOffX[3];
-            float bOffY[3];
+            vector3 b;
+            vector3 bOffX;
+            vector3 bOffY;
             if (EnableDoF) {
                 vector2 lensUV;
                 vector2 dirUV;
                 GetSampleUVsDoF<MSAARate, BlockSize>(tileSubsampleLensPos, frameJitter, sMem.tileDoF.focalToLensScale,
                                                      subsampleIndex, lensUV, dirUV);
 
-                vector3 uvw;
                 triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                     lensUV, dirUV, uvw);
-                b[0] = uvw.x;
-                b[1] = uvw.y;
-                b[2] = uvw.z;
+                                     lensUV, dirUV, b);
 
                 // we don't have proper derivatives for the DoF path, yet
                 vector2 dirUV_dX = dirUV + vector2(sMem.tileDoF.focalToLensScale.x, 0.0f) * derivativeMultiplier;
                 triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                     lensUV, dirUV_dX, uvw);
-                bOffX[0] = uvw.x;
-                bOffX[1] = uvw.y;
-                bOffX[2] = uvw.z;
+                                     lensUV, dirUV_dX, bOffX);
 
                 vector2 dirUV_dY = dirUV + vector2(0.0f, sMem.tileDoF.focalToLensScale.y) * derivativeMultiplier;
                 triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                     lensUV, dirUV_dY, uvw);
-                bOffY[0] = uvw.x;
-                bOffY[1] = uvw.y;
-                bOffY[2] = uvw.z;
+                                     lensUV, dirUV_dY, bOffY);
             } else {
                 vector2 alpha = getSubsampleUnitOffset<MSAARate>(frameJitter, subsampleIndex);
 
-                vector3 uvw;
-                triThread.calcUVW(triTile, alpha, uvw);
-                b[0] = uvw.x;
-                b[1] = uvw.y;
-                b[2] = uvw.z;
+                triThread.calcUVW(triTile, alpha, b);
 
                 vector2 alpha_dX = alpha + vector2(1.0f, 0.0f) * derivativeMultiplier;
-                triThread.calcUVW(triTile, alpha_dX, uvw);
-                bOffX[0] = uvw.x;
-                bOffX[1] = uvw.y;
-                bOffX[2] = uvw.z;
+                triThread.calcUVW(triTile, alpha_dX, bOffX);
 
                 vector2 alpha_dY = alpha + vector2(0.0f, 1.0f) * derivativeMultiplier;
-                triThread.calcUVW(triTile, alpha_dY, uvw);
-                bOffY[0] = uvw.x;
-                bOffY[1] = uvw.y;
-                bOffY[2] = uvw.z;
+                triThread.calcUVW(triTile, alpha_dY, bOffY);
             }
 
+            InterpolatedVertex vInterp = interpolate(verts, triShade, b);
+            InterpolatedVertex vInterpX = interpolate(verts, triShade, bOffX);
+            InterpolatedVertex vInterpY = interpolate(verts, triShade, bOffY);
+            vector2 dUVdX = vInterpX.uv - vInterp.uv;
+            vector2 dUVdY = vInterpY.uv - vInterp.uv;
+
 #if COLOR_SHADING_MODE == SM_BARYCENTRIC
-            result += BarycentricShade(b, triIndex, triShade, cameraPos, cameraLookVector, verts, materials, textures);
+            result += BarycentricShade(b);
 #elif COLOR_SHADING_MODE == SM_TRI_ID
             result += hashedColor(triIndex);
 #elif COLOR_SHADING_MODE == SM_UV
-            result += UVShade(b, triIndex, triShade, cameraPos, cameraLookVector, verts, materials, textures);
+            result += UVShade(vInterp);
 #elif COLOR_SHADING_MODE == SM_WS_NORMAL
-            result += WSNormalShade(b, triIndex, triShade, cameraPos, cameraLookVector, verts, materials, textures);
+            result += WSNormalShade(vInterp);
 #elif COLOR_SHADING_MODE == SM_NO_MATERIAL_BRDF
-            result +=
-                NoMaterialBRDFShade(b, triIndex, triShade, cameraPos, cameraLookVector, verts, materials, textures);
+            result += NoMaterialBRDFShade(vInterp, cameraPos);
 #elif COLOR_SHADING_MODE == SM_LAMBERTIAN_TEXTURE
-            result +=
-                LambertianTextureShade(b, triIndex, triShade, cameraPos, cameraLookVector, verts, materials, textures);
+            result += LambertianTextureShade(triShade.material, vInterp, materials, textures);
 #elif COLOR_SHADING_MODE == SM_FULL_BRDF
-            result += FullGGXShade(b, bOffX, bOffY, triIndex, triShade, cameraPos, cameraLookVector, verts, materials,
-                                   textures, env);
+            result += GGXShade(triShade.material, vInterp, dUVdX, dUVdY, cameraPos, materials, textures, env);
 #elif COLOR_SHADING_MODE == SM_MATERIAL_ID
             result += hashedColor(triShade.material);
 #else
@@ -255,16 +238,12 @@ CUDA_DEVICE vector4 TrueMSAAShade(ResolveSMem& sMem,
         triTile.setup(triIntersect, sMem.tile.rayOrigin, sMem.tile.majorDirDiff, sMem.tile.minorDirDiff);
         IntersectTriangleThread triThread(triTile, sample3D.centerDir);
 
-        float b[3];
-        float bOffX[3];
-        float bOffY[3];
+        vector3 b;
+        vector3 bOffX;
+        vector3 bOffY;
         if (EnableDoF) {
-            vector3 uvw;
             triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                 centroidLensUV, centroidDirUV, uvw);
-            b[0] = uvw.x;
-            b[1] = uvw.y;
-            b[2] = uvw.z;
+                                 centroidLensUV, centroidDirUV, b);
 
             // TODO(anankervis): we don't have proper derivatives for the DoF path, yet
             // but this seems to work well when the lens radius is relatively small and the focal plane is close
@@ -279,56 +258,28 @@ CUDA_DEVICE vector4 TrueMSAAShade(ResolveSMem& sMem,
 
             vector2 dirUV_dX = centroidDirUV + vector2(derivScale.x, 0.0f);
             triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                 centroidLensUV, dirUV_dX, uvw);
-            bOffX[0] = uvw.x;
-            bOffX[1] = uvw.y;
-            bOffX[2] = uvw.z;
+                                 centroidLensUV, dirUV_dX, bOffX);
 
             vector2 dirUV_dY = centroidDirUV + vector2(0.0f, derivScale.y);
             triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
-                                 centroidLensUV, dirUV_dY, uvw);
-            bOffY[0] = uvw.x;
-            bOffY[1] = uvw.y;
-            bOffY[2] = uvw.z;
+                                 centroidLensUV, dirUV_dY, bOffY);
         } else {
-            vector3 uvw;
-            triThread.calcUVW(triTile, centroidAlpha, uvw);
-            b[0] = uvw.x;
-            b[1] = uvw.y;
-            b[2] = uvw.z;
+            triThread.calcUVW(triTile, centroidAlpha, b);
 
             vector2 alpha_dX = centroidAlpha + vector2(1.0f, 0.0f);
-            triThread.calcUVW(triTile, alpha_dX, uvw);
-            bOffX[0] = uvw.x;
-            bOffX[1] = uvw.y;
-            bOffX[2] = uvw.z;
+            triThread.calcUVW(triTile, alpha_dX, bOffX);
 
             vector2 alpha_dY = centroidAlpha + vector2(0.0f, 1.0f);
-            triThread.calcUVW(triTile, alpha_dY, uvw);
-            bOffY[0] = uvw.x;
-            bOffY[1] = uvw.y;
-            bOffY[2] = uvw.z;
+            triThread.calcUVW(triTile, alpha_dY, bOffY);
         }
 
-        vector2 uv(0.0f);
-        vector3 position(0.0f);
-        vector3 normal(0.0f);
-        vector2 ddx(0.0f);
-        vector2 ddy(0.0f);
-        for (int j = 0; j < 3; ++j) {
-            ShadingVertex vert = verts[triShade.indices[j]];
-            position += vert.pos * b[j];
-            normal += vector3(vert.normal) * b[j];
-            uv += vert.uv * b[j];
-            ddx += vert.uv * bOffX[j];
-            ddy += vert.uv * bOffY[j];
-        }
-        ddx -= uv;
-        ddy -= uv;
+        InterpolatedVertex vInterp = interpolate(verts, triShade, b);
+        InterpolatedVertex vInterpX = interpolate(verts, triShade, bOffX);
+        InterpolatedVertex vInterpY = interpolate(verts, triShade, bOffY);
+        vector2 dUVdX = vInterpX.uv - vInterp.uv;
+        vector2 dUVdY = vInterpY.uv - vInterp.uv;
 
-        vector4 shadedColor =
-            FullGGXShadeAfterInterpolation(triShade.material, uv, ddx, ddy, position, normalize(normal), cameraPos,
-                                           cameraLookVector, verts, materials, textures, env);
+        vector4 shadedColor = GGXShade(triShade.material, vInterp, dUVdX, dUVdY, cameraPos, materials, textures, env);
         result += shadedColor * __popc(sampleMask);
     }
     result *= 1.0f / MSAARate;

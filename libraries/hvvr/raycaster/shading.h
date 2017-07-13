@@ -16,20 +16,24 @@
 
 namespace hvvr {
 
-CUDA_DEVICE_INL vector4 ReadTexture(cudaTextureObject_t* tex, unsigned index, vector2 uv, vector2 ddx, vector2 ddy) {
-    return vector4(tex2DGrad<float4>(tex[index], uv.x, uv.y, float2(ddx), float2(ddy)));
+template <typename T>
+CUDA_DEVICE_INL T interpolate(const T& v0, const T& v1, const T& v2, vector3 b) {
+    return v0 * b.x + v1 * b.y + v2 * b.z;
 }
 
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 BarycentricShade(float b[3],
-                                         uint32_t,
-                                         const PrecomputedTriangleType&,
-                                         vector3,
-                                         vector3,
-                                         const ShadingVertex* CUDA_RESTRICT,
-                                         const SimpleMaterial* CUDA_RESTRICT,
-                                         cudaTextureObject_t*) {
-    return vector4(b[0], b[1], b[2], 1.0f);
+CUDA_DEVICE_INL InterpolatedVertex interpolate(const ShadingVertex* CUDA_RESTRICT verts,
+                                               const PrecomputedTriangleShade& triShade,
+                                               vector3 b) {
+    ShadingVertex v0 = verts[triShade.indices[0]];
+    ShadingVertex v1 = verts[triShade.indices[1]];
+    ShadingVertex v2 = verts[triShade.indices[2]];
+
+    InterpolatedVertex r;
+    r.pos = interpolate(v0.pos, v1.pos, v2.pos, b);
+    r.normal = interpolate(vector3(v0.normal), vector3(v1.normal), vector3(v2.normal), b);
+    r.uv = interpolate(v0.uv, v1.uv, v2.uv, b);
+
+    return r;
 }
 
 CUDA_DEVICE_INL vector4 hashedColor(uint32_t hash) {
@@ -39,126 +43,57 @@ CUDA_DEVICE_INL vector4 hashedColor(uint32_t hash) {
     return vector4(red, green, blue, 1.0f);
 }
 
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 UVShade(float b[3],
-                                uint32_t,
-                                const PrecomputedTriangleType& tri,
-                                vector3,
-                                vector3,
-                                const ShadingVertex* CUDA_RESTRICT verts,
-                                const SimpleMaterial* CUDA_RESTRICT,
-                                cudaTextureObject_t*) {
-    vector3 result = vector3(0.0f, 0.0f, 0.0f);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        result += vector3(vert.uv * b[i], 0.0);
-    }
-    return vector4(result, 1.0f);
+CUDA_DEVICE_INL vector4 ReadTexture(cudaTextureObject_t* tex, unsigned index, vector2 uv, vector2 ddx, vector2 ddy) {
+    return vector4(tex2DGrad<float4>(tex[index], uv.x, uv.y, float2(ddx), float2(ddy)));
 }
 
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 WSNormalShade(float b[3],
-                                      uint32_t,
-                                      const PrecomputedTriangleType& tri,
-                                      vector3,
-                                      vector3,
-                                      const ShadingVertex* CUDA_RESTRICT verts,
-                                      const SimpleMaterial* CUDA_RESTRICT,
-                                      cudaTextureObject_t*) {
-    vector3 normal = vector3(0.0, 0.0, 0.0);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        normal += vector3(vert.normal) * b[i];
-    }
-    return vector4(normal * 0.5f + 0.5f, 1.0f);
+CUDA_DEVICE_INL vector4 BarycentricShade(vector3 b) {
+    return vector4(b, 1.0f);
 }
 
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 NoMaterialBRDFShade(float b[3],
-                                            uint32_t,
-                                            const PrecomputedTriangleType& tri,
-                                            vector3 cameraPos,
-                                            vector3 cameraLookVector,
-                                            const ShadingVertex* CUDA_RESTRICT verts,
-                                            const SimpleMaterial* CUDA_RESTRICT,
-                                            cudaTextureObject_t*) {
-    vector3 position = vector3(0.0, 0.0, 0.0);
-    vector3 normal = vector3(0.0, 0.0, 0.0);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        position += vert.pos * b[i];
-        normal += vector3(vert.normal) * b[i];
-    }
+CUDA_DEVICE_INL vector4 UVShade(const InterpolatedVertex& vInterp) {
+    return vector4(vInterp.uv, 0.0f, 1.0f);
+}
+
+CUDA_DEVICE_INL vector4 WSNormalShade(const InterpolatedVertex& vInterp) {
+    return vector4(vInterp.normal * 0.5f + 0.5f, 1.0f);
+}
+
+CUDA_DEVICE_INL vector4 NoMaterialBRDFShade(const InterpolatedVertex& vInterp,
+                                            vector3 cameraPos) {
     LightPoint light = DefaultPointLight(vector3(0.0f, 2.0f, 0.0f));
+    vector3 normal = normalize(vInterp.normal);
 
-    vector3 V = normalize(cameraPos - position);
+    vector3 V = normalize(cameraPos - vInterp.pos);
     vector3 BaseColor = vector3(1.0f, 1.0f, 1.0f);
     // F0 of nonmetals is constant 0.04f in Unreal
     vector3 F0 = vector3(0.04f);
     float roughness = 1.0f;
-    return vector4(PointLightContribution(position, normal, V, BaseColor, roughness, F0, light), 1.0f);
+    return vector4(PointLightContribution(vInterp.pos, normal, V, BaseColor, roughness, F0, light), 1.0f);
 }
 
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 LambertianTextureShade(float b[3],
-                                               uint32_t,
-                                               const PrecomputedTriangleType& tri,
-                                               vector3 cameraPos,
-                                               vector3 cameraLookVector,
-                                               const ShadingVertex* CUDA_RESTRICT verts,
+CUDA_DEVICE_INL vector4 LambertianTextureShade(uint32_t materialIndex,
+                                               const InterpolatedVertex& vInterp,
                                                const SimpleMaterial* CUDA_RESTRICT materials,
                                                cudaTextureObject_t* textures) {
-    vector2 uv = vector2(0.0f);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        uv += vert.uv * b[i];
-    }
-    SimpleMaterial material = materials[tri.material];
-    uint64_t temp = material.textureIDsAndShadingModel;
-    uint32_t textureIndex = (temp >> SimpleMaterial::diffuseBitShift) & SimpleMaterial::textureMask;
-    return ReadTexture(textures, textureIndex, uv, vector2(0.0f), vector2(0.0f));
-}
-
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 WSNormalAndCSZShade(float b[3],
-                                            uint32_t,
-                                            const PrecomputedTriangleType& tri,
-                                            vector3 cameraPos,
-                                            vector3 cameraLookVector,
-                                            const ShadingVertex* CUDA_RESTRICT verts,
-                                            const SimpleMaterial* CUDA_RESTRICT materials,
-                                            cudaTextureObject_t* textures) {
-    vector3 position = vector3(0.0, 0.0, 0.0);
-    vector3 normal = vector3(0.0, 0.0, 0.0);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        position += vert.pos * b[i];
-        normal += vector3(vert.normal) * b[i];
-    }
-
-    float csZ = -dot(cameraLookVector, position - cameraPos);
-    return vector4(normal, csZ);
-}
-
-CUDA_DEVICE_INL vector4 FullGGXShadeAfterInterpolation(uint32_t materialIndex,
-                                                       vector2 uv,
-                                                       vector2 ddx,
-                                                       vector2 ddy,
-                                                       vector3 position,
-                                                       vector3 normal,
-                                                       vector3 cameraPos,
-                                                       vector3 cameraLookVector,
-                                                       const ShadingVertex* CUDA_RESTRICT verts,
-                                                       const SimpleMaterial* CUDA_RESTRICT materials,
-                                                       cudaTextureObject_t* textures,
-                                                       const LightingEnvironment& env) {
     SimpleMaterial material = materials[materialIndex];
     uint64_t temp = material.textureIDsAndShadingModel;
+    uint32_t textureIndex = (temp >> SimpleMaterial::diffuseBitShift) & SimpleMaterial::textureMask;
+    return ReadTexture(textures, textureIndex, vInterp.uv, vector2(0.0f), vector2(0.0f));
+}
+
+CUDA_DEVICE_INL vector4 GGXShade(uint32_t materialIndex,
+                                 const InterpolatedVertex& vInterp,
+                                 vector2 dUVdX,
+                                 vector2 dUVdY,
+                                 vector3 cameraPos,
+                                 const SimpleMaterial* CUDA_RESTRICT materials,
+                                 cudaTextureObject_t* textures,
+                                 const LightingEnvironment& env) {
+    SimpleMaterial material = materials[materialIndex];
+    uint64_t temp = material.textureIDsAndShadingModel;
+
+    vector3 normal = normalize(vInterp.normal);
 
     ShadingModel shadingModel = ShadingModel(temp & SimpleMaterial::textureMask);
     if (shadingModel == ShadingModel::emissive) {
@@ -166,7 +101,7 @@ CUDA_DEVICE_INL vector4 FullGGXShadeAfterInterpolation(uint32_t materialIndex,
 
         vector4 emissiveColor = material.emissive;
         if (emissiveTextureIndex != SimpleMaterial::badTextureIndex) {
-            emissiveColor = ReadTexture(textures, emissiveTextureIndex, uv, ddx, ddy);
+            emissiveColor = ReadTexture(textures, emissiveTextureIndex, vInterp.uv, dUVdX, dUVdY);
         }
 
         return emissiveColor;
@@ -177,19 +112,19 @@ CUDA_DEVICE_INL vector4 FullGGXShadeAfterInterpolation(uint32_t materialIndex,
 
         vector3 BaseColor = vector3(material.diffuse);
         if (diffuseTextureIndex != SimpleMaterial::badTextureIndex) {
-            BaseColor = vector3(ReadTexture(textures, diffuseTextureIndex, uv, ddx, ddy));
+            BaseColor = vector3(ReadTexture(textures, diffuseTextureIndex, vInterp.uv, dUVdX, dUVdY));
         }
 
-        vector3 V = normalize(cameraPos - position);
+        vector3 V = normalize(cameraPos - vInterp.pos);
 
         vector3 F0 = vector3(material.specular);
         if (specularTextureIndex != SimpleMaterial::badTextureIndex) {
-            F0 = vector3(ReadTexture(textures, specularTextureIndex, uv, ddx, ddy));
+            F0 = vector3(ReadTexture(textures, specularTextureIndex, vInterp.uv, dUVdX, dUVdY));
         }
 
         float roughness = 1.0 - material.glossiness;
         if (glossyTextureIndex != SimpleMaterial::badTextureIndex) {
-            roughness = 1.0f - ReadTexture(textures, glossyTextureIndex, uv, ddx, ddy).x;
+            roughness = 1.0f - ReadTexture(textures, glossyTextureIndex, vInterp.uv, dUVdX, dUVdY).x;
         }
 
         vector3 radiance = vector3(material.emissive);
@@ -204,58 +139,26 @@ CUDA_DEVICE_INL vector4 FullGGXShadeAfterInterpolation(uint32_t materialIndex,
             if (i >= env.directionalLightCount)
                 break;
 
-            radiance +=
-                DirectionalLightContribution(position, normal, V, BaseColor, roughness, F0, env.directionalLights[i]);
+            radiance += DirectionalLightContribution(vInterp.pos, normal, V, BaseColor, roughness, F0,
+                                                     env.directionalLights[i]);
         }
 
         for (int i = 0; i < MAX_POINT_LIGHTS; i++) {
             if (i >= env.pointLightCount)
                 break;
 
-            radiance += PointLightContribution(position, normal, V, BaseColor, roughness, F0, env.pointLights[i]);
+            radiance += PointLightContribution(vInterp.pos, normal, V, BaseColor, roughness, F0, env.pointLights[i]);
         }
 
         for (int i = 0; i < MAX_SPOT_LIGHTS; ++i) {
             if (i >= env.spotLightCount)
                 break;
 
-            radiance += SpotLightContribution(position, normal, V, BaseColor, roughness, F0, env.spotLights[i]);
+            radiance += SpotLightContribution(vInterp.pos, normal, V, BaseColor, roughness, F0, env.spotLights[i]);
         }
 
         return vector4(max(radiance.x, 0.0f), max(radiance.y, 0.0f), max(radiance.z, 0.0f), 1.0f);
     }
-}
-
-template <typename PrecomputedTriangleType>
-CUDA_DEVICE_INL vector4 FullGGXShade(float b[3],
-                                     float bOffX[3],
-                                     float bOffY[3],
-                                     uint32_t,
-                                     const PrecomputedTriangleType& tri,
-                                     vector3 cameraPos,
-                                     vector3 cameraLookVector,
-                                     const ShadingVertex* CUDA_RESTRICT verts,
-                                     const SimpleMaterial* CUDA_RESTRICT materials,
-                                     cudaTextureObject_t* textures,
-                                     const LightingEnvironment& env) {
-    vector2 uv(0.0f);
-    vector2 ddx(0.0f);
-    vector2 ddy(0.0f);
-    vector3 position(0.0f);
-    vector3 normal(0.0f);
-#pragma unroll
-    for (int i = 0; i < 3; ++i) {
-        ShadingVertex vert = verts[tri.indices[i]];
-        position += vert.pos * b[i];
-        normal += vector3(vert.normal) * b[i];
-        uv += vert.uv * b[i];
-        ddx += vert.uv * bOffX[i];
-        ddy += vert.uv * bOffY[i];
-    }
-    ddx -= uv;
-    ddy -= uv;
-    return FullGGXShadeAfterInterpolation(tri.material, uv, ddx, ddy, position, normalize(normal), cameraPos,
-                                          cameraLookVector, verts, materials, textures, env);
 }
 
 } // namespace hvvr

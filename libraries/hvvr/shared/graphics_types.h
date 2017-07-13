@@ -88,6 +88,13 @@ struct ShadingVertex {
     uint32_t pad0;
 };
 
+// we need a new struct, because some ShadingVertex members are compressed
+struct InterpolatedVertex {
+    vector3 pos;
+    vector3 normal;
+    vector2 uv;
+};
+
 // Skin weights (8 bytes)
 struct ALIGN(4) SkinWeights {
     static const size_t MAX_WEIGHTS = 4;
