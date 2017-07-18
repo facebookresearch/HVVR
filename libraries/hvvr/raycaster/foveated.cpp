@@ -10,7 +10,7 @@
 #include "foveated.h"
 #include "camera.h"
 #include "constants_math.h"
-#include "cuda_raycaster.h"
+#include "gpu_camera.h"
 #include "raycaster.h"
 #include "sample_clustering.h"
 
@@ -125,7 +125,6 @@ void generateEyeSpacePolarFoveatedSampleData(FoveatedSampleData& foveatedSampleD
 }
 
 void polarSpaceFoveatedSetup(Raycaster* raycaster) {
-
     for (auto& camera : raycaster->_cameras) {
         if (!camera->getEnabled())
             continue;
@@ -141,10 +140,10 @@ void polarSpaceFoveatedSetup(Raycaster* raycaster) {
             float maxEccentricityRadians = raycaster->_spec.foveatedSamplePattern.maxFOVDegrees * RadiansPerDegree;
             size_t paddedSampleCount =
                 ((camera->_foveatedSampleData.eyeSpaceSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
-            RegisterPolarFoveatedSamples(camera.get(), camera->_polarRemapToPixel, maxEccentricityRadians,
-                                         ringEccentricities, eccentricityRemap, uint32_t(samplesPerRing),
-                                         uint32_t(paddedSampleCount));
-            UpdateEyeSpaceFoveatedSamples(camera.get(), camera->_foveatedSampleData.precomputedEyeSpaceSamples);
+            camera->_gpuCamera->registerPolarFoveatedSamples(camera->_polarRemapToPixel, maxEccentricityRadians,
+                                                             ringEccentricities, eccentricityRemap,
+                                                             uint32_t(samplesPerRing), uint32_t(paddedSampleCount));
+            camera->_gpuCamera->updateEyeSpaceFoveatedSamples(camera->_foveatedSampleData.precomputedEyeSpaceSamples);
             camera->_foveatedSampleData.simpleBlockFrusta =
                 DynamicArray<SimpleRayFrustum>(camera->_foveatedSampleData.samples.blockFrusta3D.size());
             camera->_foveatedSampleData.simpleTileFrusta =

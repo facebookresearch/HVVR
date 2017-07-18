@@ -16,7 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="camera.h" />
-    <ClInclude Include="cuda_raycaster.h" />
     <ClInclude Include="cuda_util.h" />
     <ClInclude Include="frusta.h" />
     <ClInclude Include="gbuffer.h" />
@@ -27,7 +26,6 @@
     <ClInclude Include="gpu_image.h" />
     <ClInclude Include="gpu_samples.h" />
     <ClInclude Include="gpu_scene_state.h" />
-    <ClInclude Include="intersect.h" />
     <ClInclude Include="kernel_constants.h" />
     <ClInclude Include="light.h" />
     <ClInclude Include="lighting_env.h" />
@@ -41,8 +39,6 @@
     <ClInclude Include="magic_constants.h" />
     <ClInclude Include="raycaster.h" />
     <ClInclude Include="raycaster_spec.h" />
-    <ClInclude Include="remap.h" />
-    <ClInclude Include="resolve.h" />
     <ClInclude Include="samples.h" />
     <ClInclude Include="sample_clustering.h" />
     <ClInclude Include="sample_hierarchy.h" />
@@ -58,7 +54,6 @@
   <ItemGroup>
     <ClCompile Include="camera.cpp" />
     <ClCompile Include="foveated.cpp" />
-    <ClCompile Include="gpu_scene.cpp" />
     <ClCompile Include="light.cpp" />
     <ClCompile Include="model.cpp" />
     <ClCompile Include="raycaster.cpp" />
@@ -75,9 +70,6 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="cuda_raycaster.cu">
-      <FileType>Document</FileType>
-    </CudaCompile>
     <CudaCompile Include="frusta.cu">
       <FileType>Document</FileType>
     </CudaCompile>

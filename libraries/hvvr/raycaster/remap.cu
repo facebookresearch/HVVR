@@ -7,12 +7,10 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "cuda_raycaster.h"
 #include "gpu_camera.h"
 #include "gpu_context.h"
 #include "graphics_types.h"
 #include "kernel_constants.h"
-#include "remap.h"
 #include "shading_helpers.h"
 
 
@@ -36,12 +34,12 @@ CUDA_DEVICE uint32_t mergeSplitColorsPentile(const uint32_t* c, uint32_t x, uint
 // TODO(anankervis): for SplitColorSamples > 1, store each channel as a single component, instead of wasting space on
 // RGBA PixelType
 template <class PixelType, uint32_t SplitColorSamples>
-CUDA_KERNEL void MapLinearArrayToImageKernel(PixelType* src,
-                                             int32_t* remap,
-                                             PixelType* dstImage,
-                                             uint32_t imageWidth,
-                                             uint32_t imageHeight,
-                                             uint32_t imageStride) {
+CUDA_KERNEL void RemapKernel(PixelType* src,
+                             int32_t* remap,
+                             PixelType* dstImage,
+                             uint32_t imageWidth,
+                             uint32_t imageHeight,
+                             uint32_t imageStride) {
     uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < imageWidth && y < imageHeight) {
@@ -79,23 +77,23 @@ CUDA_KERNEL void MapLinearArrayToImageKernel(PixelType* src,
     }
 }
 
-void RemapSampleResultsToImage(GPUCamera& camera) {
+void GPUCamera::remap() {
     KernelDim dim;
-    if (camera.resultImage.height() > 1) { // 2D Image
-        dim = KernelDim(camera.resultImage.width(), camera.resultImage.height(), CUDA_BLOCK_WIDTH, CUDA_BLOCK_HEIGHT);
+    if (resultImage.height() > 1) { // 2D Image
+        dim = KernelDim(resultImage.width(), resultImage.height(), CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
     } else {
-        dim = KernelDim(camera.resultImage.width(), CUDA_BLOCK_SIZE);
+        dim = KernelDim(resultImage.width(), CUDA_GROUP_SIZE);
     }
 
-    unsigned int* d_imageData = (unsigned int*)camera.resultImage.data();
-    switch (camera.splitColorSamples) {
+    uint32_t* d_imageData = (uint32_t*)resultImage.data();
+    switch (splitColorSamples) {
         case 1: {
             enum { SplitColorSamples = 1 };
-            switch (outputModeToPixelFormat(camera.outputMode)) {
+            switch (outputModeToPixelFormat(outputMode)) {
                 case PixelFormat::RGBA8_SRGB:
-                    MapLinearArrayToImageKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, camera.stream>>>(
-                        camera.sampleResults, camera.d_sampleRemap, d_imageData, camera.resultImage.width(),
-                        camera.resultImage.height(), camera.resultImage.stride());
+                    RemapKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, stream>>>(
+                        d_sampleResults, d_sampleRemap, d_imageData, resultImage.width(), resultImage.height(),
+                        resultImage.stride());
                     break;
                 default:
                     assert(false);
@@ -103,11 +101,11 @@ void RemapSampleResultsToImage(GPUCamera& camera) {
         } break;
         case 2: {
             enum { SplitColorSamples = 2 };
-            switch (outputModeToPixelFormat(camera.outputMode)) {
+            switch (outputModeToPixelFormat(outputMode)) {
                 case PixelFormat::RGBA8_SRGB:
-                    MapLinearArrayToImageKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, camera.stream>>>(
-                        camera.sampleResults, camera.d_sampleRemap, d_imageData, camera.resultImage.width(),
-                        camera.resultImage.height(), camera.resultImage.stride());
+                    RemapKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, stream>>>(
+                        d_sampleResults, d_sampleRemap, d_imageData, resultImage.width(), resultImage.height(),
+                        resultImage.stride());
                     break;
                 default:
                     assert(false);
@@ -115,11 +113,11 @@ void RemapSampleResultsToImage(GPUCamera& camera) {
         } break;
         case 3: {
             enum { SplitColorSamples = 3 };
-            switch (outputModeToPixelFormat(camera.outputMode)) {
+            switch (outputModeToPixelFormat(outputMode)) {
                 case PixelFormat::RGBA8_SRGB:
-                    MapLinearArrayToImageKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, camera.stream>>>(
-                        camera.sampleResults, camera.d_sampleRemap, d_imageData, camera.resultImage.width(),
-                        camera.resultImage.height(), camera.resultImage.stride());
+                    RemapKernel<uint32_t, SplitColorSamples><<<dim.grid, dim.block, 0, stream>>>(
+                        d_sampleResults, d_sampleRemap, d_imageData, resultImage.width(), resultImage.height(),
+                        resultImage.stride());
                     break;
                 default:
                     assert(false);
@@ -132,10 +130,14 @@ void RemapSampleResultsToImage(GPUCamera& camera) {
 }
 
 // TODO: switch to a gather approach to improve perf?
-CUDA_KERNEL void PolarFoveatedRemapKernel(
-    uint32_t* src, float* tmaxSrc, vector2ui* remap, Texture2D dstImage, Texture2D tmaxDstImage, size_t elementCount) {
+CUDA_KERNEL void RemapPolarFoveatedKernel(uint32_t* src,
+                                          float* tmaxSrc,
+                                          vector2ui* remap,
+                                          Texture2D dstImage,
+                                          Texture2D tmaxDstImage,
+                                          size_t rawSampleCount) {
     unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < elementCount) {
+    if (i < rawSampleCount) {
         vector2ui offset = remap[i];
         vector4 p = FromColor4Unorm8SRgb(src[i]);
         float t = tmaxSrc[i];
@@ -144,19 +146,15 @@ CUDA_KERNEL void PolarFoveatedRemapKernel(
     }
 }
 
-void PolarFoveatedRemap(Camera* cameraPtr) {
-    assert(gGPUContext->graphicsResourcesMapped);
-    bool created;
-    auto& camera = gGPUContext->getCreateCamera(cameraPtr, created);
-    assert(!created);
-    size_t sampleCount = camera.rawPolarFoveatedImage.width * camera.rawPolarFoveatedImage.height;
-    KernelDim dim = KernelDim(sampleCount, CUDA_BLOCK_SIZE);
+void GPUCamera::remapPolarFoveated() {
+    uint32_t rawSampleCount = rawPolarFoveatedImage.width * rawPolarFoveatedImage.height;
+    KernelDim dim = KernelDim(rawSampleCount, CUDA_GROUP_SIZE);
 
-    switch (outputModeToPixelFormat(camera.outputMode)) {
+    switch (outputModeToPixelFormat(outputMode)) {
         case PixelFormat::RGBA8_SRGB:
-            PolarFoveatedRemapKernel<<<dim.grid, dim.block, 0, camera.stream>>>(
-                (uint32_t*)camera.sampleResults.data(), camera.d_tMaxBuffer, camera.d_polarRemapToPixel,
-                camera.rawPolarFoveatedImage, camera.polarFoveatedDepthImage, sampleCount);
+            RemapPolarFoveatedKernel<<<dim.grid, dim.block, 0, stream>>>(d_sampleResults.data(), d_tMaxBuffer,
+                                                                         d_polarRemapToPixel, rawPolarFoveatedImage,
+                                                                         polarFoveatedDepthImage, rawSampleCount);
             break;
         default:
             assert(false);

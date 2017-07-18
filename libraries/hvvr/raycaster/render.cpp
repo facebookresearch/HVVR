@@ -8,8 +8,8 @@
  */
 
 #include "camera.h"
-#include "cuda_raycaster.h"
 #include "gpu_camera.h"
+#include "gpu_context.h"
 #include "raycaster.h"
 #include "raycaster_common.h"
 #include "thread_pool.h"
@@ -110,19 +110,6 @@ static inline void debugPrintTileCost(const SampleHierarchy& samples, size_t blo
     printf("Mean Block Cost: %f\nMax Block Cost: %f\n", meanBlockCost, maxBlockCost);
 }
 
-void Raycaster::blitResult(Camera* camera) {
-    (void)camera;
-
-#if OUTPUT_MODE == OUTPUT_MODE_3D_API
-    if (camera->_renderTarget.isHardwareRenderTarget()) {
-        CopyImageToBoundTexture(camera);
-    } else {
-        CopyImageToCPU(camera, (unsigned int*)camera->_renderTarget.data, camera->_renderTarget.width,
-                       camera->_renderTarget.height, uint32_t(camera->_renderTarget.stride));
-    }
-#endif
-}
-
 inline static FloatRect expandRect(const FloatRect& rect, const float fractionToExpand) {
     const vector2 extent = {rect.upper.x - rect.lower.x, rect.upper.y - rect.lower.y};
     const vector2 newLower = {rect.lower.x - (extent.x * fractionToExpand),
@@ -138,13 +125,14 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
+        GPUCamera* gpuCamera = camera->_gpuCamera;
 
         if (camera->_renderTarget.isHardwareRenderTarget() && camera->_newHardwareTarget) {
-            BindTextureToCamera(camera.get(), camera->_renderTarget);
+            gpuCamera->bindTexture(*_gpuContext, camera->_renderTarget);
             camera->_newHardwareTarget = false;
         }
     }
-    MapGraphicsResources();
+    _gpuContext->interopMapResources();
 #endif
     {
         // Render and reconstruct from each camera
@@ -155,12 +143,12 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
             const SampleHierarchy& samples = camera->getSampleData().samples;
             uint32_t tileCount = uint32_t(samples.tileFrusta3D.size());
 
-            GPUCamera* gpuCamera = GetCamera(camera.get());
+            GPUCamera* gpuCamera = camera->_gpuCamera;
             // begin filling data for the GPU
             Camera_StreamedData* streamed = gpuCamera->streamedDataLock(tileCount);
 
             vector2 jitter = camera->_frameJitters[camera->_frameCount % camera->_frameJitters.size()];
-            SetCameraJitter(camera.get(), {jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f});
+            gpuCamera->setCameraJitter(vector2(jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f));
             ++camera->_frameCount;
 
             matrix4x4 cameraToWorld = camera->getCameraToWorld();
@@ -221,8 +209,8 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
                 }
             }
 
-            UpdateCameraPerFrame(camera.get(), camera->getTranslation(), camera->getForward(),
-                                 camera->getSampleToCamera(), cameraToWorld);
+            gpuCamera->updatePerFrame(camera->getTranslation(), camera->getForward(), camera->getSampleToCamera(),
+                                      cameraToWorld);
 
             BlockInfo blockInfo;
             blockInfo.blockFrusta = camera->_blockFrustaTransformed;
@@ -244,7 +232,8 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
             // end filling data for the GPU
             gpuCamera->streamedDataUnlock();
 
-            DeferredMSAAIntersectAndRemap(camera.get());
+            gpuCamera->intersectShadeResolve(_gpuContext->sceneState);
+            gpuCamera->remap();
 
             // size_t totalTris = _bvhScene.triangles.size;
             // size_t trisIntersected = camera->tileCullInfo.triIndexCount;
@@ -256,9 +245,18 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
-        blitResult(camera.get());
+        GPUCamera* gpuCamera = camera->_gpuCamera;
+
+#if OUTPUT_MODE == OUTPUT_MODE_3D_API
+        if (camera->_renderTarget.isHardwareRenderTarget()) {
+            gpuCamera->copyImageToBoundTexture();
+        } else {
+            gpuCamera->copyImageToCPU((uint32_t*)camera->_renderTarget.data, camera->_renderTarget.width,
+                                      camera->_renderTarget.height, uint32_t(camera->_renderTarget.stride));
+        }
+#endif
     }
-    UnmapGraphicsResources();
+    _gpuContext->interopUnmapResources();
 #endif
 }
 
@@ -269,8 +267,10 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
+        GPUCamera* gpuCamera = camera->_gpuCamera;
+
         if (camera->_renderTarget.isHardwareRenderTarget() && camera->_newHardwareTarget) {
-            BindTextureToCamera(camera.get(), camera->_renderTarget);
+            gpuCamera->bindTexture(*_gpuContext, camera->_renderTarget);
             camera->_newHardwareTarget = false;
         }
     }
@@ -278,38 +278,38 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
+        GPUCamera* gpuCamera = camera->_gpuCamera;
+
         const SampleData& sampleData = camera->getSampleData();
         const vector3& eyeDirection = camera->getEyeDir();
 
         vector2 jitter = camera->_frameJitters[camera->_frameCount % camera->_frameJitters.size()];
-        SetCameraJitter(camera.get(), {jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f});
+        gpuCamera->setCameraJitter(vector2(jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f));
         ++camera->_frameCount;
 
-        matrix3x3 cameraToSamplesMatrix = invert(camera->getSampleToCamera());
-        matrix3x3 eyeToCameraMatrix = matrix3x3::rotationFromZAxis(-eyeDirection);
-        matrix4x4 eyeToWorldMatrix = camera->getCameraToWorld() * matrix4x4(eyeToCameraMatrix);
+        matrix3x3 cameraToSample = invert(camera->getSampleToCamera());
+        matrix3x3 eyeToCamera = matrix3x3::rotationFromZAxis(-eyeDirection);
+        matrix4x4 eyeToWorld = camera->getCameraToWorld() * matrix4x4(eyeToCamera);
         // TODO: principled derivation of magic constant
         FloatRect cullRect = expandRect(sampleData.sampleBounds, 0.15f);
 
-        CalculatePerFrameFoveatedData(camera.get(), cullRect, cameraToSamplesMatrix, eyeToCameraMatrix,
-                                      eyeToWorldMatrix);
+        gpuCamera->updatePerFrameFoveatedData(cullRect, cameraToSample, eyeToCamera, eyeToWorld);
 
         auto blockCount = (camera->_foveatedSampleData.eyeSpaceSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
         camera->_foveatedSampleData.blockCount = blockCount;
     }
 
 #if OUTPUT_MODE == OUTPUT_MODE_3D_API
-    MapGraphicsResources();
+    _gpuContext->interopMapResources();
 #endif
     {
         for (auto& camera : _cameras) {
             if (!camera->getEnabled())
                 continue;
+            GPUCamera* gpuCamera = camera->_gpuCamera;
 
-            GPUCamera* gpuCamera = GetCamera(camera.get());
-
-            AcquireTileCullInformation(camera.get(), camera->_foveatedSampleData.simpleTileFrusta.data(),
-                                       camera->_foveatedSampleData.simpleBlockFrusta.data());
+            gpuCamera->acquireTileCullData(camera->_foveatedSampleData.simpleTileFrusta.data(),
+                                           camera->_foveatedSampleData.simpleBlockFrusta.data());
             uint32_t blockCount = uint32_t(camera->_foveatedSampleData.simpleBlockFrusta.size());
             uint32_t tileCount = uint32_t(camera->_foveatedSampleData.simpleTileFrusta.size());
 
@@ -330,8 +330,8 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
                 simpleTileFrusta[i] = camera->_foveatedSampleData.simpleTileFrusta[i];
             }
 
-            UpdateCameraPerFrame(camera.get(), camera->getTranslation(), camera->getForward(),
-                                 camera->getSampleToCamera(), camera->getCameraToWorld());
+            gpuCamera->updatePerFrame(camera->getTranslation(), camera->getForward(), camera->getSampleToCamera(),
+                                      camera->getCameraToWorld());
 
             BlockInfo blockInfo;
             blockInfo.blockFrusta = ArrayView<const RayPacketFrustum3D>(
@@ -351,23 +351,21 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
             // end filling data for the GPU
             gpuCamera->streamedDataUnlock();
 
-            DeferredMSAAIntersect(camera.get());
-            PolarFoveatedRemap(camera.get());
+            gpuCamera->intersectShadeResolve(_gpuContext->sceneState);
+            gpuCamera->remapPolarFoveated();
 
             const vector3& eyeDirection = camera->getEyeDir();
-            matrix3x3 eyeToCameraMatrix = matrix3x3::rotationFromZAxis(-eyeDirection);
-            matrix3x3 sampleSpaceToEyeSpaceMatrix = invert(eyeToCameraMatrix) * camera->getSampleToCamera();
+            matrix3x3 eyeToCamera = matrix3x3::rotationFromZAxis(-eyeDirection);
+            matrix3x3 sampleToEye = invert(eyeToCamera) * camera->getSampleToCamera();
 
-            matrix4x4 eyeToWorldMatrix = camera->getCameraToWorld() * matrix4x4(eyeToCameraMatrix);
-            matrix4x4 eyeSpaceToPreviousEyeSpaceMatrix = camera->_previousWorldToEyeSpaceMatrix * eyeToWorldMatrix;
+            matrix4x4 eyeToWorld = camera->getCameraToWorld() * matrix4x4(eyeToCamera);
+            matrix4x4 eyeToEyePrevious = camera->_worldToEyePrevious * eyeToWorld;
 
             // Handles Temporal Filtering if necessary
-            ConvertFromFoveatedPolarToScreenSpace(camera.get(), eyeSpaceToPreviousEyeSpaceMatrix,
-                                                  camera->_previousEyeSpaceToPreviousSampleSpaceMatrix,
-                                                  sampleSpaceToEyeSpaceMatrix);
+            gpuCamera->foveatedPolarToScreenSpace(eyeToEyePrevious, camera->_eyePreviousToSamplePrevious, sampleToEye);
 
-            camera->_previousWorldToEyeSpaceMatrix = invert(eyeToWorldMatrix);
-            camera->_previousEyeSpaceToPreviousSampleSpaceMatrix = invert(sampleSpaceToEyeSpaceMatrix);
+            camera->_worldToEyePrevious = invert(eyeToWorld);
+            camera->_eyePreviousToSamplePrevious = invert(sampleToEye);
         }
     }
 #if OUTPUT_MODE == OUTPUT_MODE_3D_API
@@ -375,14 +373,16 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
+        GPUCamera* gpuCamera = camera->_gpuCamera;
+
         if (camera->_renderTarget.isHardwareRenderTarget()) {
-            CopyImageToBoundTexture(camera.get());
+            gpuCamera->copyImageToBoundTexture();
         } else {
-            CopyImageToCPU(camera.get(), (unsigned int*)camera->_renderTarget.data, camera->_renderTarget.width,
-                           camera->_renderTarget.height, uint32_t(camera->_renderTarget.stride));
+            gpuCamera->copyImageToCPU((uint32_t*)camera->_renderTarget.data, camera->_renderTarget.width,
+                                      camera->_renderTarget.height, uint32_t(camera->_renderTarget.stride));
         }
     }
-    UnmapGraphicsResources();
+    _gpuContext->interopUnmapResources();
 #endif
 }
 

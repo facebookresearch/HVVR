@@ -9,7 +9,7 @@
 
 #include "raycaster.h"
 #include "camera.h"
-#include "cuda_raycaster.h"
+#include "gpu_context.h"
 #include "light.h"
 #include "model.h"
 #include "texture.h"
@@ -37,9 +37,11 @@ Raycaster::Raycaster(const RayCasterSpecification& spec) : _spec(spec), _sceneDi
     }
     _threadPool = std::make_unique<ThreadPool>(numThreads, threadInit);
 
-    if (!Init()) {
+    if (!GPUContext::cudaInit()) {
         assert(false);
     }
+
+    _gpuContext = std::make_unique<GPUContext>();
 }
 
 Raycaster::~Raycaster() {
@@ -47,11 +49,14 @@ Raycaster::~Raycaster() {
 
     cleanupScene();
 
-    Cleanup();
+    if (_gpuContext)
+        _gpuContext->cleanup();
+
+    GPUContext::cudaCleanup();
 }
 
 Camera* Raycaster::createCamera(const FloatRect& viewport, float apertureRadius) {
-    _cameras.emplace_back(std::make_unique<Camera>(viewport, apertureRadius));
+    _cameras.emplace_back(std::make_unique<Camera>(viewport, apertureRadius, *_gpuContext));
     return (_cameras.end() - 1)->get();
 }
 

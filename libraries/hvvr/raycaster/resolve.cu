@@ -13,7 +13,6 @@
 #include "gpu_context.h"
 #include "kernel_constants.h"
 #include "prim_tests.h"
-#include "resolve.h"
 #include "shading.h"
 #include "tile_data.h"
 #include "warp_ops.h"
@@ -39,32 +38,32 @@ struct ResolveSMem {
     };
 };
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
-CUDA_DEVICE vector4 BruteForceShade(ResolveSMem& sMem,
-                                    const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferWarp,
-                                    int laneIndex,
-                                    UnpackedDirectionalSample sample3D,
-                                    vector3 lensCenterToFocalCenter,
-                                    vector2 frameJitter,
-                                    const vector2* CUDA_RESTRICT tileSubsampleLensPos,
-                                    vector3 cameraPos,
-                                    vector3 cameraLookVector,
-                                    const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
-                                    const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
-                                    const ShadingVertex* CUDA_RESTRICT verts,
-                                    const SimpleMaterial* CUDA_RESTRICT materials,
-                                    cudaTextureObject_t* textures,
-                                    const LightingEnvironment& env,
-                                    uint32_t sampleOffset,
-                                    const SampleInfo& sampleInfo,
-                                    ResolveStats* resolveStats) {
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
+CUDA_DEVICE vector4 ShadeSSAA(ResolveSMem& sMem,
+                              const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferWarp,
+                              int laneIndex,
+                              UnpackedDirectionalSample sample3D,
+                              vector3 lensCenterToFocalCenter,
+                              vector2 frameJitter,
+                              const vector2* CUDA_RESTRICT tileSubsampleLensPos,
+                              vector3 cameraPos,
+                              vector3 cameraLookVector,
+                              const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
+                              const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
+                              const ShadingVertex* CUDA_RESTRICT verts,
+                              const SimpleMaterial* CUDA_RESTRICT materials,
+                              cudaTextureObject_t* textures,
+                              const LightingEnvironment& env,
+                              uint32_t sampleOffset,
+                              const SampleInfo& sampleInfo,
+                              ResolveStats* resolveStats) {
     enum : uint32_t { badTriIndex = ~uint32_t(0) };
-    float derivativeMultiplier = rsqrtf(float(MSAARate));
+    float derivativeMultiplier = rsqrtf(float(AARate));
 
     vector4 result = vector4(0.0f, 0.0f, 0.0f, 0.0f);
     uint32_t combinedSampleMask = 0;
-    for (int compGbufferSlot = 0; compGbufferSlot < MSAARate; compGbufferSlot++) {
-        if (combinedSampleMask == (1 << MSAARate) - 1) {
+    for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
+        if (combinedSampleMask == (1 << AARate) - 1) {
             // all samples accounted for, nothing left to shade
             break;
         }
@@ -103,8 +102,8 @@ CUDA_DEVICE vector4 BruteForceShade(ResolveSMem& sMem,
             if (EnableDoF) {
                 vector2 lensUV;
                 vector2 dirUV;
-                GetSampleUVsDoF<MSAARate, BlockSize>(tileSubsampleLensPos, frameJitter, sMem.tileDoF.focalToLensScale,
-                                                     subsampleIndex, lensUV, dirUV);
+                GetSampleUVsDoF<AARate, BlockSize>(tileSubsampleLensPos, frameJitter, sMem.tileDoF.focalToLensScale,
+                                                   subsampleIndex, lensUV, dirUV);
 
                 triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
                                      lensUV, dirUV, b);
@@ -118,7 +117,7 @@ CUDA_DEVICE vector4 BruteForceShade(ResolveSMem& sMem,
                 triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
                                      lensUV, dirUV_dY, bOffY);
             } else {
-                vector2 alpha = getSubsampleUnitOffset<MSAARate>(frameJitter, subsampleIndex);
+                vector2 alpha = getSubsampleUnitOffset<AARate>(frameJitter, subsampleIndex);
 
                 triThread.calcUVW(triTile, alpha, b);
 
@@ -157,36 +156,36 @@ CUDA_DEVICE vector4 BruteForceShade(ResolveSMem& sMem,
         }
     }
 
-    result *= (1.0f / MSAARate);
+    result *= (1.0f / AARate);
     result.w = 1.0f;
     return result;
 }
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
-CUDA_DEVICE vector4 TrueMSAAShade(ResolveSMem& sMem,
-                                  const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferWarp,
-                                  int laneIndex,
-                                  UnpackedDirectionalSample sample3D,
-                                  vector3 lensCenterToFocalCenter,
-                                  vector2 frameJitter,
-                                  const vector2* CUDA_RESTRICT tileSubsampleLensPos,
-                                  vector3 cameraPos,
-                                  vector3 cameraLookVector,
-                                  const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
-                                  const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
-                                  const ShadingVertex* CUDA_RESTRICT verts,
-                                  const SimpleMaterial* CUDA_RESTRICT materials,
-                                  cudaTextureObject_t* textures,
-                                  const LightingEnvironment& env,
-                                  uint32_t sampleOffset,
-                                  const SampleInfo& sampleInfo,
-                                  ResolveStats* resolveStats) {
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
+CUDA_DEVICE vector4 ShadeMSAA(ResolveSMem& sMem,
+                              const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferWarp,
+                              int laneIndex,
+                              UnpackedDirectionalSample sample3D,
+                              vector3 lensCenterToFocalCenter,
+                              vector2 frameJitter,
+                              const vector2* CUDA_RESTRICT tileSubsampleLensPos,
+                              vector3 cameraPos,
+                              vector3 cameraLookVector,
+                              const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
+                              const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
+                              const ShadingVertex* CUDA_RESTRICT verts,
+                              const SimpleMaterial* CUDA_RESTRICT materials,
+                              cudaTextureObject_t* textures,
+                              const LightingEnvironment& env,
+                              uint32_t sampleOffset,
+                              const SampleInfo& sampleInfo,
+                              ResolveStats* resolveStats) {
     enum : uint32_t { badTriIndex = ~uint32_t(0) };
 
     vector4 result = vector4(0.0f, 0.0f, 0.0f, 0.0f);
     uint32_t combinedSampleMask = 0;
-    for (int compGbufferSlot = 0; compGbufferSlot < MSAARate; compGbufferSlot++) {
-        if (combinedSampleMask == (1 << MSAARate) - 1) {
+    for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
+        if (combinedSampleMask == (1 << AARate) - 1) {
             // all samples accounted for, nothing left to shade
             break;
         }
@@ -217,12 +216,12 @@ CUDA_DEVICE vector4 TrueMSAAShade(ResolveSMem& sMem,
         for (uint32_t centroidMask = sampleMask; centroidMask != 0;) {
             int subsampleIndex = __ffs(centroidMask) - 1;
             centroidMask &= ~(1 << subsampleIndex);
-            centroidAlpha += getSubsampleUnitOffset<MSAARate>(frameJitter, subsampleIndex) * sampleCountInv;
+            centroidAlpha += getSubsampleUnitOffset<AARate>(frameJitter, subsampleIndex) * sampleCountInv;
 
             vector2 lensUV;
             vector2 dirUV;
-            GetSampleUVsDoF<MSAARate, BlockSize>(tileSubsampleLensPos, frameJitter, sMem.tileDoF.focalToLensScale,
-                                                 subsampleIndex, lensUV, dirUV);
+            GetSampleUVsDoF<AARate, BlockSize>(tileSubsampleLensPos, frameJitter, sMem.tileDoF.focalToLensScale,
+                                               subsampleIndex, lensUV, dirUV);
             centroidLensUV += lensUV * sampleCountInv;
             centroidDirUV += dirUV * sampleCountInv;
         }
@@ -282,50 +281,50 @@ CUDA_DEVICE vector4 TrueMSAAShade(ResolveSMem& sMem,
         vector4 shadedColor = GGXShade(triShade.material, vInterp, dUVdX, dUVdY, cameraPos, materials, textures, env);
         result += shadedColor * __popc(sampleMask);
     }
-    result *= 1.0f / MSAARate;
+    result *= 1.0f / AARate;
     result.w = 1.0f;
     return result;
 }
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
-CUDA_DEVICE vector4 Resolve(ResolveSMem& sMem,
-                            const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferBlock,
-                            int laneIndex,
-                            uint32_t sampleOffset,
-                            SampleInfo sampleInfo,
-                            UnpackedDirectionalSample sample3D,
-                            vector3 lensCenterToFocalCenter,
-                            const vector2* CUDA_RESTRICT tileSubsampleLensPos,
-                            vector3 cameraPos,
-                            vector3 cameraLookVector,
-                            const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
-                            const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
-                            const ShadingVertex* CUDA_RESTRICT verts,
-                            const SimpleMaterial* CUDA_RESTRICT materials,
-                            cudaTextureObject_t* textures,
-                            LightingEnvironment env,
-                            ResolveStats* resolveStats) {
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
+CUDA_DEVICE vector4 ShadeAndResolve(ResolveSMem& sMem,
+                                    const RaycasterGBufferSubsample* CUDA_RESTRICT gBufferBlock,
+                                    int laneIndex,
+                                    uint32_t sampleOffset,
+                                    SampleInfo sampleInfo,
+                                    UnpackedDirectionalSample sample3D,
+                                    vector3 lensCenterToFocalCenter,
+                                    const vector2* CUDA_RESTRICT tileSubsampleLensPos,
+                                    vector3 cameraPos,
+                                    vector3 cameraLookVector,
+                                    const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
+                                    const PrecomputedTriangleShade* CUDA_RESTRICT trianglesShade,
+                                    const ShadingVertex* CUDA_RESTRICT verts,
+                                    const SimpleMaterial* CUDA_RESTRICT materials,
+                                    cudaTextureObject_t* textures,
+                                    LightingEnvironment env,
+                                    ResolveStats* resolveStats) {
 #if ENABLE_RESOLVE_STATS
     atomicAdd(&resolveStats->invocations, 1);
 #endif
 
     vector4 result =
 #if SUPERSHADING_MODE == SSAA_SHADE
-        BruteForceShade<MSAARate, BlockSize, EnableDoF>(
-            sMem, gBufferBlock, laneIndex, sample3D, lensCenterToFocalCenter, sampleInfo.frameJitter,
-            tileSubsampleLensPos, cameraPos, cameraLookVector, trianglesIntersect, trianglesShade, verts, materials,
-            textures, env, sampleOffset, sampleInfo, resolveStats);
+        ShadeSSAA<AARate, BlockSize, EnableDoF>(sMem, gBufferBlock, laneIndex, sample3D, lensCenterToFocalCenter,
+                                                sampleInfo.frameJitter, tileSubsampleLensPos, cameraPos,
+                                                cameraLookVector, trianglesIntersect, trianglesShade, verts, materials,
+                                                textures, env, sampleOffset, sampleInfo, resolveStats);
 #else
-        TrueMSAAShade<MSAARate, BlockSize, EnableDoF>(sMem, gBufferBlock, laneIndex, sample3D, lensCenterToFocalCenter,
-                                                      sampleInfo.frameJitter, tileSubsampleLensPos, cameraPos,
-                                                      cameraLookVector, trianglesIntersect, trianglesShade, verts,
-                                                      materials, textures, env, sampleOffset, sampleInfo, resolveStats);
+        ShadeMSAA<AARate, BlockSize, EnableDoF>(sMem, gBufferBlock, laneIndex, sample3D, lensCenterToFocalCenter,
+                                                sampleInfo.frameJitter, tileSubsampleLensPos, cameraPos,
+                                                cameraLookVector, trianglesIntersect, trianglesShade, verts, materials,
+                                                textures, env, sampleOffset, sampleInfo, resolveStats);
 #endif
 
     return result;
 }
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool TMaxBuffer, bool EnableDoF>
+template <uint32_t AARate, uint32_t BlockSize, bool TMaxBuffer, bool EnableDoF>
 CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
                                float* tMaxBuffer,
                                const RaycasterGBufferSubsample* CUDA_RESTRICT gBuffer,
@@ -356,7 +355,7 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
     // GBuffer texels are organized so that each subsample is a warp stride away from
     // the previous subsample for a single sample, so that warps can coalesce memory reads
     uint32_t warpIndex = sampleOffset / WARP_SIZE;
-    uint32_t warpOffset = warpIndex * WARP_SIZE * MSAARate;
+    uint32_t warpOffset = warpIndex * WARP_SIZE * AARate;
 
     UnpackedDirectionalSample sample3D =
         GetDirectionalSample3D(sampleOffset, sampleInfo, sampleToWorld, sampleToCamera, cameraToWorld);
@@ -378,7 +377,7 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
     }
     __syncthreads();
 
-    vector4 result = Resolve<MSAARate, BlockSize, EnableDoF>(
+    vector4 result = ShadeAndResolve<AARate, BlockSize, EnableDoF>(
         sMem, gBuffer + warpOffset, laneGetIndex(), sampleOffset, sampleInfo, sample3D, lensCenterToFocalCenter,
         tileSubsampleLensPos, cameraPos, cameraLookVector, trianglesIntersect, trianglesShade, verts, materials,
         textures, env, resolveStats);
@@ -388,14 +387,14 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
 
     if (TMaxBuffer) {
         enum { tMaxSubsampleIndex = 0 };
-        vector2 alpha = getSubsampleUnitOffset<MSAARate>(sampleInfo.frameJitter, tMaxSubsampleIndex);
+        vector2 alpha = getSubsampleUnitOffset<AARate>(sampleInfo.frameJitter, tMaxSubsampleIndex);
 
         // scan through the compressed gbuffer until we find the subsample we care about
         enum : uint32_t { badTriIndex = ~uint32_t(0) };
         float tMaxValue = CUDA_INF;
         uint32_t combinedSampleMask = 0;
-        for (int compGbufferSlot = 0; compGbufferSlot < MSAARate; compGbufferSlot++) {
-            if (combinedSampleMask == (1 << MSAARate) - 1) {
+        for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
+            if (combinedSampleMask == (1 << AARate) - 1) {
                 // all samples accounted for, nothing left to shade
                 break;
             }
@@ -420,9 +419,9 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
                     // should lensUV be forced to zero (centered)?
                     vector2 lensUV;
                     vector2 dirUV;
-                    GetSampleUVsDoF<MSAARate, BlockSize>(tileSubsampleLensPos, sampleInfo.frameJitter,
-                                                         sMem.tileDoF.focalToLensScale, tMaxSubsampleIndex, lensUV,
-                                                         dirUV);
+                    GetSampleUVsDoF<AARate, BlockSize>(tileSubsampleLensPos, sampleInfo.frameJitter,
+                                                       sMem.tileDoF.focalToLensScale, tMaxSubsampleIndex, lensUV,
+                                                       dirUV);
 
                     vector3 uvw;
                     triThreadDoF.calcUVW(triTileDoF, lensCenterToFocalCenter, sMem.tileDoF.lensU, sMem.tileDoF.lensV,
@@ -460,34 +459,16 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
     }
 }
 
-void DeferredMSAAResolve(GPUCamera& camera,
-                         uint32_t* d_sampleResults,
-                         SampleInfo sampleInfo,
-                         const matrix3x3& sampleToCamera,
-                         const matrix4x4& cameraToWorld) {
-    Camera_StreamedData& streamed = camera.streamed[camera.streamedIndexGPU];
-    Camera_LocalData& local = camera.local;
-
-    uint32_t occupiedTileCount = streamed.tileCountOccupied;
-
-    PrecomputedTriangleIntersect* trianglesIntersect = gGPUContext->sceneState.trianglesIntersect;
-    PrecomputedTriangleShade* trianglesShade = gGPUContext->sceneState.trianglesShade;
-
-    ShadingVertex* vertices = gGPUContext->sceneState.worldSpaceVertices;
-
-    SimpleMaterial* d_materials = gGPUContext->sceneState.materials;
-
-    LightingEnvironment env = gGPUContext->sceneState.lightingEnvironment;
+void GPUCamera::shadeAndResolve(GPUSceneState& sceneState, const SampleInfo& sampleInfo) {
+    Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
     static_assert(TILE_SIZE % WARP_SIZE == 0, "Tile size must be a multiple of warp size in the current architecture. "
                                               "The 'GBuffer' is interleaved in a way that would break otherwise.");
 
-    float* d_tMaxBuffer = (camera.d_tMaxBuffer.size() > 0) ? camera.d_tMaxBuffer.data() : nullptr;
-
     ResolveStats* resolveStatsPtr = nullptr;
 #if ENABLE_RESOLVE_STATS
     static GPUBuffer<ResolveStats> resolveStatsBuffer(1);
-    resolveStatsBuffer.memsetAsync(0, camera.stream);
+    resolveStatsBuffer.memsetAsync(0, stream);
     resolveStatsPtr = resolveStatsBuffer.data();
 #endif
 
@@ -502,41 +483,41 @@ void DeferredMSAAResolve(GPUCamera& camera,
         cudaEventCreate(&stop);
     }
     if (frameIndex % profileFrameSkip == 0) {
-        cudaEventRecord(start, camera.stream);
+        cudaEventRecord(start, stream);
     }
 #endif
 
-#define RESOLVE_LAUNCH(MSAARate, BlockSize, TMaxBuffer, EnableDoF, dim, stream)                                        \
-    ResolveKernel<MSAARate, BlockSize, TMaxBuffer, EnableDoF><<<dim.grid, dim.block, 0, stream>>>(                     \
-        d_sampleResults, d_tMaxBuffer, camera.d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera),        \
-        sampleToCamera, cameraToWorld, camera.d_tileSubsampleLensPos, local.tileIndexRemapOccupied.data(),             \
-        camera.position, camera.lookVector, trianglesIntersect, trianglesShade, vertices, d_materials,                 \
-        gDeviceTextureArray, env, resolveStatsPtr)
+#define RESOLVE_LAUNCH(AARate, BlockSize, TMaxBuffer, EnableDoF, dim, stream)                                          \
+    ResolveKernel<AARate, BlockSize, TMaxBuffer, EnableDoF><<<dim.grid, dim.block, 0, stream>>>(                       \
+        d_sampleResults, d_tMaxBuffer, d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera),               \
+        sampleToCamera, cameraToWorld, d_tileSubsampleLensPos, local.tileIndexRemapOccupied.data(), position,          \
+        lookVector, sceneState.trianglesIntersect, sceneState.trianglesShade, sceneState.worldSpaceVertices,           \
+        sceneState.materials, gDeviceTextureArray, sceneState.lightingEnvironment, resolveStatsPtr)
 
-    KernelDim dimResolve(occupiedTileCount * TILE_SIZE, TILE_SIZE);
-    if (d_tMaxBuffer) {
+    KernelDim dimResolve(streamedData.tileCountOccupied * TILE_SIZE, TILE_SIZE);
+    if (d_tMaxBuffer.size() != 0) {
         // output a tMax depth buffer for reprojection
         if (sampleInfo.lens.radius > 0.0f) {
             // Enable depth of field
-            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, true, true, dimResolve, camera.stream);
+            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, true, true, dimResolve, stream);
         } else {
             // No depth of field, assume all rays have the same origin
-            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, true, false, dimResolve, camera.stream);
+            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, true, false, dimResolve, stream);
         }
     } else {
         if (sampleInfo.lens.radius > 0.0f) {
             // Enable depth of field
-            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, false, true, dimResolve, camera.stream);
+            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, false, true, dimResolve, stream);
         } else {
             // No depth of field, assume all rays have the same origin
-            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, false, false, dimResolve, camera.stream);
+            RESOLVE_LAUNCH(COLOR_MODE_MSAA_RATE, TILE_SIZE, false, false, dimResolve, stream);
         }
     }
 #undef RESOLVE_LAUNCH
 
 #if PROFILE_RESOLVE
     if (frameIndex % profileFrameSkip == 0) {
-        cudaEventRecord(stop, camera.stream);
+        cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
         float timeMs = 0.0f;
         cudaEventElapsedTime(&timeMs, start, stop);
@@ -554,10 +535,10 @@ void DeferredMSAAResolve(GPUCamera& camera,
 }
 
 template <bool TMaxBuffer>
-CUDA_KERNEL void ClearEmptyTilesKernel(uint32_t* sampleResults,
-                                       float* tMaxBuffer,
-                                       const uint32_t* CUDA_RESTRICT tileIndexRemapEmpty,
-                                       uint32_t emptyTileCount) {
+CUDA_KERNEL void ClearEmptyKernel(uint32_t* sampleResults,
+                                  float* tMaxBuffer,
+                                  const uint32_t* CUDA_RESTRICT tileIndexRemapEmpty,
+                                  uint32_t emptyTileCount) {
     uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t compactedTileIndex = index / TILE_SIZE;
     uint32_t threadIndex = index - compactedTileIndex * TILE_SIZE;
@@ -571,23 +552,22 @@ CUDA_KERNEL void ClearEmptyTilesKernel(uint32_t* sampleResults,
     }
 }
 
-void ClearEmptyTiles(GPUCamera& camera, uint32_t* d_sampleResults, cudaStream_t stream) {
-    Camera_StreamedData& streamed = camera.streamed[camera.streamedIndexGPU];
-    Camera_LocalData& local = camera.local;
+void GPUCamera::clearEmpty() {
+    Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
-    uint32_t tileCount = streamed.tileCountEmpty;
-    uint32_t blockCount = (tileCount * TILE_SIZE + CUDA_BLOCK_SIZE - 1) / CUDA_BLOCK_SIZE;
-    dim3 dimGrid((uint32_t)blockCount, 1, 1);
-    dim3 dimBlock(CUDA_BLOCK_SIZE, 1, 1);
+    uint32_t tileCount = streamedData.tileCountEmpty;
+    uint32_t blockCount = (tileCount * TILE_SIZE + CUDA_GROUP_SIZE - 1) / CUDA_GROUP_SIZE;
     uint32_t* d_emptyTileIndexRemap = local.tileIndexRemapEmpty.data();
-    float* d_tMaxBuffer = (camera.d_tMaxBuffer.size() > 0) ? camera.d_tMaxBuffer.data() : nullptr;
 
-    if (d_tMaxBuffer) {
-        ClearEmptyTilesKernel<true>
+    dim3 dimGrid(blockCount, 1, 1);
+    dim3 dimBlock(CUDA_GROUP_SIZE, 1, 1);
+
+    if (d_tMaxBuffer.size() != 0) {
+        ClearEmptyKernel<true>
             <<<dimGrid, dimBlock, 0, stream>>>(d_sampleResults, d_tMaxBuffer, d_emptyTileIndexRemap, tileCount);
     } else {
-        ClearEmptyTilesKernel<false>
-            <<<dimGrid, dimBlock, 0, stream>>>(d_sampleResults, d_tMaxBuffer, d_emptyTileIndexRemap, tileCount);
+        ClearEmptyKernel<false>
+            <<<dimGrid, dimBlock, 0, stream>>>(d_sampleResults, nullptr, d_emptyTileIndexRemap, tileCount);
     }
 }
 

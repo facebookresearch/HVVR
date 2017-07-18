@@ -213,7 +213,7 @@ void ResetCullFrusta(GPURayPacketFrustum* d_blockFrusta,
                      cudaStream_t stream) {
     {
         size_t combinedBlockAndTileCount = tileCount + blockCount;
-        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_BLOCK_SIZE);
+        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
         ResetCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, blockCount, d_tileFrusta, tileCount);
     }
 }
@@ -227,13 +227,13 @@ void CalculateSampleCullFrusta(GPURayPacketFrustum* d_blockFrusta,
                                cudaStream_t stream) {
     static_assert((TILE_SIZE % 32 == 0), "TILE_SIZE must be a multiple of 32, the CUDA warp size");
     {
-        KernelDim dim = KernelDim(sampleCount, CUDA_BLOCK_SIZE);
+        KernelDim dim = KernelDim(sampleCount, CUDA_GROUP_SIZE);
         CalculateSampleCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, d_tileFrusta, sampleInfo,
                                                                             sampleCount);
     }
     {
         size_t combinedBlockAndTileCount = tileCount + blockCount;
-        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_BLOCK_SIZE);
+        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
         DecodeSampleCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, blockCount, d_tileFrusta,
                                                                          tileCount);
     }
@@ -283,7 +283,7 @@ void CalculateWorldSpaceFrusta(SimpleRayFrustum* blockFrustaWS,
                                cudaStream_t stream) {
     static_assert((TILE_SIZE % 32 == 0), "TILE_SIZE must be a multiple of 32, the CUDA warp size");
     size_t combinedBlockAndTileCount = tileCount + blockCount;
-    KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_BLOCK_SIZE);
+    KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
     CalculateWorldSpaceFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(
         blockFrustaWS, tileFrustaWS, blockFrustaES, tileFrustaES, eyeToWorldMatrix, blockCount, tileCount);
 }

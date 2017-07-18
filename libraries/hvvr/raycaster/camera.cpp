@@ -8,7 +8,8 @@
  */
 
 #include "camera.h"
-#include "cuda_raycaster.h"
+#include "gpu_camera.h"
+#include "gpu_context.h"
 #include "sample_clustering.h"
 #include "vector_math.h"
 
@@ -66,8 +67,8 @@ SampleData::SampleData(const Sample* rawSamples,
     }
 }
 
-Camera::Camera(const FloatRect& viewport, float apertureRadius)
-    : _lens({apertureRadius, 1.0f}), _eyeDir(0.0f, 0.0f, -1.0f) {
+Camera::Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuContext)
+    : _gpuCamera(nullptr), _lens({apertureRadius, 1.0f}), _eyeDir(0.0f, 0.0f, -1.0f) {
     setViewport(viewport);
 
     std::uniform_real_distribution<float> uniformRandomDist(0.0f, 1.0f);
@@ -76,6 +77,10 @@ Camera::Camera(const FloatRect& viewport, float apertureRadius)
     for (int i = 0; i < 16; ++i) {
         _frameJitters.push_back({rand(), rand()});
     }
+
+    bool created = false;
+    _gpuCamera = &gpuContext.getCreateCamera(this, created);
+    assert(created == true);
 }
 
 Camera::~Camera() {}
@@ -145,10 +150,10 @@ void Camera::setSampleData(const SampleData& sampleData) {
         _tileFrustaTransformed = DynamicArray<RayPacketFrustum3D>(tileCount);
     }
 
-    UpdateCameraConfig(this, _outputMode, sampleData.imageLocationToSampleIndex.data(),
-                       sampleData.blockedSamplePositions.data(), sampleData.blockedSampleExtents.data(), _lens,
-                       sampleData.sampleCount, _renderTarget.width, _renderTarget.height,
-                       uint32_t(_renderTarget.stride), sampleData.splitColorSamples);
+    _gpuCamera->updateConfig(_outputMode, sampleData.imageLocationToSampleIndex.data(),
+                             sampleData.blockedSamplePositions.data(), sampleData.blockedSampleExtents.data(), _lens,
+                             sampleData.sampleCount, _renderTarget.width, _renderTarget.height,
+                             uint32_t(_renderTarget.stride), sampleData.splitColorSamples);
 }
 
 const SampleData& Camera::getSampleData() const {

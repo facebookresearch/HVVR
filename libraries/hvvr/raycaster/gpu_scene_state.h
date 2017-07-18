@@ -28,7 +28,9 @@ struct SceneRefitTaskNode {
     uint32_t nodeChild; // the parent node and child index
 };
 
-struct GPUSceneState {
+// TODO(anankervis): merge into Raycaster
+class GPUSceneState {
+public:
     GPUBuffer<PrecomputedTriangleIntersect> trianglesIntersect; // filled by GPU
     GPUBuffer<PrecomputedTriangleShade> trianglesShade;         // copied from CPU
     GPUBuffer<ShadingVertex> untransformedVertices;
@@ -57,10 +59,18 @@ struct GPUSceneState {
     void reset();
 
     void update();
+    // if an updated BVH is available on the GPU, returns true and copies the GPU data to the CPU pointer
+    // assumes size of dstNodes matches the number of nodes last passed into UpdateSceneGeometry
     bool fetchUpdatedBVH(BVHNode* dstNodes);
 
+    // if this is called, animate must also be called afterward to populate the transforms
     void setGeometry(const Raycaster& raycaster);
     void animate(const matrix4x4* modelToWorld, size_t modelToWorldCount);
+
+    void updateLighting(const Raycaster& raycaster);
+    void updateMaterials(SimpleMaterial* _materials, size_t materialCount);
+
+protected:
 };
 
 } // namespace hvvr

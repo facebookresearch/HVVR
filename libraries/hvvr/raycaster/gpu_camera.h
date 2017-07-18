@@ -22,6 +22,10 @@
 namespace hvvr {
 
 class Camera;
+class GPUContext;
+class GPUSceneState;
+struct SampleInfo;
+struct EccentricityToTexCoordMapping;
 
 // Keep in sync with blockcull.h/RayPacketFrustum
 struct GPURayPacketFrustum {
@@ -71,10 +75,6 @@ struct Camera_LocalData {
     GPUBuffer<SimpleRayFrustum> tileFrusta3D;
 };
 
-#pragma warning(push)
-#pragma warning(disable : 4324) // structure was padded due to alignment specifier
-
-
 struct ContrastEnhancementBuffers {
     // For NVIDIA-style contrast enhancement
     Texture2D horizontallyFiltered;
@@ -86,7 +86,17 @@ struct ContrastEnhancementSettings {
     float f_e;
 };
 
-struct GPUCamera {
+inline PixelFormat outputModeToPixelFormat(RaycasterOutputMode mode) {
+    (void)mode;
+    return PixelFormat::RGBA8_SRGB;
+}
+
+#pragma warning(push)
+#pragma warning(disable : 4324) // structure was padded due to alignment specifier
+
+// TODO(anankervis): merge with Camera class
+class GPUCamera {
+public:
     // Terminology from http://cwyman.org/papers/siga16_gazeTrackedFoveatedRendering.pdf
     TemporalFilterSettings temporalFilterSettings;
 
@@ -109,6 +119,8 @@ struct GPUCamera {
 
     Camera_StreamedData* streamedDataLock(uint32_t tileCount);
     void streamedDataUnlock();
+    // the GPU is done consuming streamed data for this frame
+    void streamedDataGpuDone();
 
     GPUBuffer<vector2> d_tileSubsampleLensPos;
 
@@ -131,7 +143,7 @@ struct GPUCamera {
 
     cudaEvent_t transferTileToCPUEvent = nullptr;
 
-    GPUBuffer<uint32_t> sampleResults;
+    GPUBuffer<uint32_t> d_sampleResults;
     uint32_t sampleCount;
     GPUBuffer<float> d_tMaxBuffer;
     GPUImage resultImage;
@@ -173,6 +185,73 @@ struct GPUCamera {
     GPUCamera(const Camera* cameraPtr);
 
     void initLookupTables(int MSAARate);
+
+    // per-frame updates
+    void setCameraJitter(vector2 jitter);
+    void updatePerFrame(vector3 cameraPos,
+                        vector3 cameraLookVector,
+                        const matrix3x3& _sampleToCamera,
+                        const matrix4x4& _cameraToWorld);
+    void updatePerFrameFoveatedData(const FloatRect& sampleBounds,
+                                    const matrix3x3& cameraToSample,
+                                    const matrix3x3& eyeToCamera,
+                                    const matrix4x4& eyeToWorld);
+
+    // sample config updates
+    void updateConfig(RaycasterOutputMode _outputMode,
+                      int32_t* sampleRemap,
+                      float* sampleLocations,
+                      Sample::Extents* sampleExtents,
+                      ThinLens _lens,
+                      uint32_t _sampleCount,
+                      uint32_t imageWidth,
+                      uint32_t imageHeight,
+                      uint32_t imageStride,
+                      uint32_t _splitColorSamples);
+    void registerPolarFoveatedSamples(const std::vector<vector2ui>& polarRemapToPixel,
+                                      float _maxEccentricityRadians,
+                                      const std::vector<float>& ringEccentricities,
+                                      const std::vector<float>& eccentricityCoordinateMap,
+                                      uint32_t samplesPerRing,
+                                      uint32_t paddedSampleCount);
+    void updateEyeSpaceFoveatedSamples(const ArrayView<PrecomputedDirectionSample> precomputedDirectionalSamples);
+
+    // attach a texture from a 3D API, used when OUTPUT_MODE = OUTPUT_MODE_3D_API
+    bool bindTexture(GPUContext& gpuContext, ImageResourceDescriptor texture);
+    // GPUContext::graphicsResourcesMapped must be true before calling this function
+    void copyImageToBoundTexture();
+
+    void copyImageToCPU(uint32_t* imageData, uint32_t imageWidth, uint32_t imageHeight, uint32_t imageStride);
+
+    // copy GPU-generated frusta data back to CPU for traversal (foveated render path)
+    // Assumes CalculatePerFrameFoveatedData has previously been called
+    void acquireTileCullData(SimpleRayFrustum* tileFrusta, SimpleRayFrustum* blockFrusta);
+
+    void intersectShadeResolve(GPUSceneState& sceneState);
+
+    // convert from linear post-resolve results buffer to results image
+    void remap();
+    void remapPolarFoveated();
+
+    void foveatedPolarToScreenSpace(const matrix4x4& eyeToEyePrevious,
+                                    const matrix3x3& eyePreviousToSamplePrevious,
+                                    const matrix3x3& sampleToEye);
+
+    // dump the current set of rays (including subsamples) to a CPU buffer
+    void dumpRays(std::vector<SimpleRay>& rays);
+
+protected:
+
+    // intersect triangles
+    void intersect(GPUSceneState& sceneState, const SampleInfo& sampleInfo);
+
+    // fill empty tiles with default clear value
+    void clearEmpty();
+    // shade occupied tiles and resolve AA subsamples
+    void shadeAndResolve(GPUSceneState& sceneState, const SampleInfo& sampleInfo);
+
+    void getEccentricityMap(EccentricityToTexCoordMapping& map) const;
+    void foveatedPolarTemporalFilter(const matrix4x4& eyeToEyePrevious);
 };
 #pragma warning(pop)
 

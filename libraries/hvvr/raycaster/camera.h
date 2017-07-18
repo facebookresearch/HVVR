@@ -20,6 +20,9 @@
 
 namespace hvvr {
 
+class GPUCamera;
+class GPUContext;
+
 // preprocessed samples, ready for rendering
 struct SampleData {
     SampleHierarchy samples;
@@ -51,7 +54,7 @@ class Camera {
     // TODO(anankervis): remove
     friend void polarSpaceFoveatedSetup(Raycaster* raycaster);
 public:
-    Camera(const FloatRect& viewport, float apertureRadius);
+    Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuContext);
     ~Camera();
 
     Camera(const Camera&) = delete;
@@ -99,8 +102,10 @@ public:
 protected:
     // TODO(anankervis): clean up direct access of protected members by Raycaster
 
-    matrix4x4 _previousWorldToEyeSpaceMatrix = matrix4x4::identity();
-    matrix3x3 _previousEyeSpaceToPreviousSampleSpaceMatrix = matrix3x3::identity();
+    GPUCamera* _gpuCamera;
+
+    matrix4x4 _worldToEyePrevious = matrix4x4::identity();
+    matrix3x3 _eyePreviousToSamplePrevious = matrix3x3::identity();
 
     // Incremeted on every render
     uint32_t _frameCount = 0;

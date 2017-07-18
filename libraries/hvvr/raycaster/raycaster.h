@@ -33,11 +33,11 @@ struct MeshData;
 struct TextureData;
 struct LightUnion;
 struct SimpleMaterial;
+class GPUContext;
 
 class Raycaster {
-    friend struct GPUSceneState;
+    friend class GPUSceneState;
     // TODO(anankervis): remove
-    friend void UpdateLighting(const Raycaster& raycaster);
     friend void polarSpaceFoveatedSetup(Raycaster* raycaster);
 
 public:
@@ -86,6 +86,9 @@ protected:
 
     bool _sceneDirty;
 
+    //// GPU
+    std::unique_ptr<GPUContext> _gpuContext;
+
     void updateScene(double elapsedTime);
     void buildScene();
     void uploadScene();
@@ -97,9 +100,6 @@ protected:
 
     // traverse BVH and generate lists of triangles to intersect on the GPU
     void buildTileTriangleLists(const BlockInfo& blockInfo, Camera_StreamedData* streamed);
-
-    //// output
-    void blitResult(Camera* camera);
 };
 
 } // namespace hvvr

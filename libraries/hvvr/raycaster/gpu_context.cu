@@ -7,14 +7,53 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "cuda_raycaster.h"
 #include "gpu_context.h"
 #include "memory_helpers.h"
 
+#include <cuda_profiler_api.h>
+
+
 namespace hvvr {
 
-// TODO(anankervis): remove
-GPUContext* gGPUContext = nullptr;
+bool GPUContext::cudaInit() {
+    int deviceCount = 0;
+    cutilSafeCall(cudaGetDeviceCount(&deviceCount));
+
+    int device = 0;
+#if OUTPUT_MODE == OUTPUT_MODE_3D_API
+    cudaDeviceProp deviceProps = {};
+
+    // if we're on Windows, search for a non-TCC device
+    for (int n = 0; n < deviceCount; n++) {
+        cudaGetDeviceProperties(&deviceProps, n);
+        if (deviceProps.tccDriver == 0) {
+            device = n;
+            break;
+        }
+    }
+#endif
+    cutilSafeCall(cudaSetDevice(device));
+
+    uint32_t deviceFlags = 0;
+    deviceFlags |= cudaDeviceMapHost;
+    if (cudaSuccess != cudaSetDeviceFlags(deviceFlags)) {
+        assert(false);
+        return false;
+    }
+
+    return true;
+}
+
+void GPUContext::cudaCleanup() {
+    cutilSafeCall(cudaProfilerStop()); // Flush profiling data for nvprof
+}
+
+GPUContext::GPUContext() : graphicsResourcesMapped(false) {
+}
+
+GPUContext::~GPUContext() {
+    cleanup();
+}
 
 void GPUContext::getCudaGraphicsResources(std::vector<cudaGraphicsResource_t>& resources) {
     for (const auto& c : cameras) {
@@ -24,7 +63,7 @@ void GPUContext::getCudaGraphicsResources(std::vector<cudaGraphicsResource_t>& r
     }
 }
 
-void GPUContext::maybeMapResources() {
+void GPUContext::interopMapResources() {
     if (!graphicsResourcesMapped) {
         std::vector<cudaGraphicsResource_t> resources;
         getCudaGraphicsResources(resources);
@@ -47,7 +86,7 @@ void GPUContext::maybeMapResources() {
     }
 }
 
-void GPUContext::unmapResources() {
+void GPUContext::interopUnmapResources() {
     if (graphicsResourcesMapped) {
         std::vector<cudaGraphicsResource_t> resources;
         getCudaGraphicsResources(resources);
@@ -60,13 +99,13 @@ void GPUContext::unmapResources() {
 }
 
 void GPUContext::cleanup() {
-    unmapResources();
+    interopUnmapResources();
     for (auto& c : cameras) {
         if (c.resultsResource) {
             cutilSafeCall(cudaGraphicsUnregisterResource(c.resultsResource));
         }
         c.resultImage.reset();
-        c.sampleResults = GPUBuffer<uint32_t>();
+        c.d_sampleResults = GPUBuffer<uint32_t>();
 
         safeCudaEventDestroy(c.transferTileToCPUEvent);
         safeCudaStreamDestroy(c.stream);

@@ -18,7 +18,7 @@
 
 namespace hvvr {
 
-struct GPUCamera;
+class GPUCamera;
 
 // From http://graphics.cs.williams.edu/papers/DeepGBuffer16/Mara2016DeepGBuffer.pdf
 static constexpr int tau[] = {

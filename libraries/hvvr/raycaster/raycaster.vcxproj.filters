@@ -58,9 +58,6 @@
     <ClInclude Include="warp_ops.h">
       <Filter>cuda\util</Filter>
     </ClInclude>
-    <ClInclude Include="cuda_raycaster.h">
-      <Filter>cuda</Filter>
-    </ClInclude>
     <ClInclude Include="gbuffer.h">
       <Filter>cuda</Filter>
     </ClInclude>
@@ -70,16 +67,7 @@
     <ClInclude Include="gpu_context.h">
       <Filter>cuda</Filter>
     </ClInclude>
-    <ClInclude Include="intersect.h">
-      <Filter>cuda</Filter>
-    </ClInclude>
     <ClInclude Include="kernel_constants.h">
-      <Filter>cuda</Filter>
-    </ClInclude>
-    <ClInclude Include="remap.h">
-      <Filter>cuda</Filter>
-    </ClInclude>
-    <ClInclude Include="resolve.h">
       <Filter>cuda</Filter>
     </ClInclude>
     <ClInclude Include="material.h" />
@@ -113,9 +101,6 @@
     </ClCompile>
     <ClCompile Include="foveated.cpp">
       <Filter>samples</Filter>
-    </ClCompile>
-    <ClCompile Include="gpu_scene.cpp">
-      <Filter>cuda\scene</Filter>
     </ClCompile>
     <ClCompile Include="samples.cpp">
       <Filter>samples</Filter>
@@ -168,9 +153,6 @@
     </CudaCompile>
     <CudaCompile Include="gpu_samples.cu">
       <Filter>cuda\samples</Filter>
-    </CudaCompile>
-    <CudaCompile Include="cuda_raycaster.cu">
-      <Filter>cuda</Filter>
     </CudaCompile>
     <CudaCompile Include="gpu_scene_state.cu">
       <Filter>cuda\scene</Filter>

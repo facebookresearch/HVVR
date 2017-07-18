@@ -11,7 +11,6 @@
 #include "gbuffer.h"
 #include "gpu_camera.h"
 #include "gpu_context.h"
-#include "intersect.h"
 #include "kernel_constants.h"
 #include "prim_tests.h"
 #include "sort.h"
@@ -369,14 +368,10 @@ CUDA_KERNEL void GenerateHeat() {
 }
 #endif
 
-void DeferredIntersectTiles(GPUCamera& camera,
-                            SampleInfo sampleInfo,
-                            const matrix3x3& sampleToCamera,
-                            const matrix4x4& cameraToWorld) {
-    Camera_StreamedData& streamed = camera.streamed[camera.streamedIndexGPU];
-    Camera_LocalData& local = camera.local;
+void GPUCamera::intersect(GPUSceneState& sceneState, const SampleInfo& sampleInfo) {
+    Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
-    uint32_t occupiedTileCount = streamed.tileCountOccupied;
+    uint32_t occupiedTileCount = streamedData.tileCountOccupied;
 
 #if PROFILE_INTERSECT
     static uint64_t frameIndex = 0;
@@ -389,30 +384,28 @@ void DeferredIntersectTiles(GPUCamera& camera,
         cudaEventCreate(&stop);
     }
     if (frameIndex % profileFrameSkip == 0) {
-        cudaEventRecord(start, camera.stream);
+        cudaEventRecord(start, stream);
     }
 #endif
 
     KernelDim dimIntersect(occupiedTileCount * TILE_SIZE, TILE_SIZE);
     if (sampleInfo.lens.radius > 0.0f) {
         // Enable depth of field
-        IntersectKernel<COLOR_MODE_MSAA_RATE, TILE_SIZE, true>
-            <<<dimIntersect.grid, dimIntersect.block, 0, camera.stream>>>(
-                camera.d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera), sampleToCamera, cameraToWorld,
-                camera.d_tileSubsampleLensPos, local.tileIndexRemapOccupied, local.tileTriRanges, streamed.triIndices,
-                local.tileFrusta3D, gGPUContext->sceneState.trianglesIntersect);
+        IntersectKernel<COLOR_MODE_MSAA_RATE, TILE_SIZE, true><<<dimIntersect.grid, dimIntersect.block, 0, stream>>>(
+            d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera), sampleToCamera, cameraToWorld,
+            d_tileSubsampleLensPos, local.tileIndexRemapOccupied, local.tileTriRanges, streamedData.triIndices,
+            local.tileFrusta3D, sceneState.trianglesIntersect);
     } else {
         // No depth of field, assume all rays have the same origin
-        IntersectKernel<COLOR_MODE_MSAA_RATE, TILE_SIZE, false>
-            <<<dimIntersect.grid, dimIntersect.block, 0, camera.stream>>>(
-                camera.d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera), sampleToCamera, cameraToWorld,
-                camera.d_tileSubsampleLensPos, local.tileIndexRemapOccupied, local.tileTriRanges, streamed.triIndices,
-                local.tileFrusta3D, gGPUContext->sceneState.trianglesIntersect);
+        IntersectKernel<COLOR_MODE_MSAA_RATE, TILE_SIZE, false><<<dimIntersect.grid, dimIntersect.block, 0, stream>>>(
+            d_gBuffer, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera), sampleToCamera, cameraToWorld,
+            d_tileSubsampleLensPos, local.tileIndexRemapOccupied, local.tileTriRanges, streamedData.triIndices,
+            local.tileFrusta3D, sceneState.trianglesIntersect);
     }
 
 #if PROFILE_INTERSECT
     if (frameIndex % profileFrameSkip == 0) {
-        cudaEventRecord(stop, camera.stream);
+        cudaEventRecord(stop, stream);
         cudaEventSynchronize(stop);
         float timeMs = 0.0f;
         cudaEventElapsedTime(&timeMs, start, stop);
@@ -421,19 +414,19 @@ void DeferredIntersectTiles(GPUCamera& camera,
     }
     frameIndex++;
 
-    // I need more of workload to get consistent clocks out of the GPU...
-    GenerateHeat<<<1024, 32, 0, camera.stream>>>();
+    // I need more of a workload to get consistent clocks out of the GPU...
+    GenerateHeat<<<1024, 32, 0, stream>>>();
 #endif
 }
 
 template <uint32_t MSAARate>
-CUDA_KERNEL void GenerateExplicitRayBufferKernel(SimpleRay* rayBuffer,
-                                                 SampleInfo sampleInfo,
-                                                 matrix4x4 sampleToWorld,
-                                                 matrix3x3 sampleToCamera,
-                                                 matrix4x4 cameraToWorld,
-                                                 const vector2* CUDA_RESTRICT tileSubsampleLensPos,
-                                                 int sampleCount) {
+CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
+                                SampleInfo sampleInfo,
+                                matrix4x4 sampleToWorld,
+                                matrix3x3 sampleToCamera,
+                                matrix4x4 cameraToWorld,
+                                const vector2* CUDA_RESTRICT tileSubsampleLensPos,
+                                int sampleCount) {
     uint32_t sampleOffset = blockIdx.x * blockDim.x + threadIdx.x;
     if (sampleOffset < sampleCount) {
         UnpackedDirectionalSample sample3D =
@@ -461,15 +454,20 @@ CUDA_KERNEL void GenerateExplicitRayBufferKernel(SimpleRay* rayBuffer,
     }
 }
 
-void GenerateExplicitRayBuffer(GPUCamera& camera, SimpleRay* d_rayBuffer) {
-    SampleInfo sampleInfo(camera);
-    uint32_t tileCount = (camera.sampleCount + TILE_SIZE - 1) / TILE_SIZE;
+void GPUCamera::dumpRays(std::vector<SimpleRay>& rays) {
+    uint32_t rayCount = COLOR_MODE_MSAA_RATE * sampleCount;
+    GPUBuffer<SimpleRay> d_rays(rayCount);
+    rays.resize(rayCount);
+
+    SampleInfo sampleInfo(*this);
+    uint32_t tileCount = (sampleCount + TILE_SIZE - 1) / TILE_SIZE;
 
     KernelDim dim(tileCount * TILE_SIZE, TILE_SIZE);
-    cudaStream_t stream = 0;
-    GenerateExplicitRayBufferKernel<COLOR_MODE_MSAA_RATE><<<dim.grid, dim.block, 0, stream>>>(
-        d_rayBuffer, sampleInfo, matrix4x4(camera.sampleToCamera) * camera.cameraToWorld, camera.sampleToCamera,
-        camera.cameraToWorld, camera.d_tileSubsampleLensPos.data(), camera.sampleCount);
+    DumpRaysKernel<COLOR_MODE_MSAA_RATE>
+        <<<dim.grid, dim.block, 0, stream>>>(d_rays, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera),
+                                             sampleToCamera, cameraToWorld, d_tileSubsampleLensPos.data(), sampleCount);
+
+    d_rays.readback(rays.data());
 }
 
 } // namespace hvvr

@@ -45,6 +45,46 @@ void GPUSceneState::reset() {
     updatedBVHAvailable = false;
 }
 
+void GPUSceneState::updateLighting(const Raycaster& raycaster) {
+    LightingEnvironment& env = lightingEnvironment;
+    memset(&env, 0, sizeof(LightingEnvironment));
+
+    for (const auto& light : raycaster._lights) {
+        const LightUnion& lightUnion = light->getLightUnion();
+
+        switch (lightUnion.type) {
+        case LightType::directional:
+            if (env.directionalLightCount < MAX_DIRECTIONAL_LIGHTS) {
+                env.directionalLights[env.directionalLightCount++] = lightUnion.directional;
+            } else {
+                fprintf(stderr, "Too many directional lights for raycaster!");
+            }
+            break;
+        case LightType::point:
+            if (env.pointLightCount < MAX_POINT_LIGHTS) {
+                env.pointLights[env.pointLightCount++] = lightUnion.point;
+            } else {
+                fprintf(stderr, "Too many point lights for raycaster!");
+            }
+            break;
+        case LightType::spot:
+            if (env.spotLightCount < MAX_SPOT_LIGHTS) {
+                env.spotLights[env.spotLightCount++] = lightUnion.spot;
+            } else {
+                fprintf(stderr, "Too many spot lights for raycaster!");
+            }
+            break;
+        default:
+            assert(false);
+            break;
+        }
+    }
+}
+
+void GPUSceneState::updateMaterials(SimpleMaterial* _materials, size_t materialCount) {
+    materials = GPUBuffer<SimpleMaterial>(_materials, _materials + materialCount);
+}
+
 // transform verts, generate precomputed verts
 CUDA_KERNEL void SceneTransformVerticesKernel(const ShadingVertex* CUDA_RESTRICT inputVertices,
                                               ShadingVertex* outputVertices,

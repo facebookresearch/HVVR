@@ -8,8 +8,9 @@
  */
 
 #include "bvh_node.h"
-#include "cuda_raycaster.h"
 #include "debug.h"
+#include "gpu_context.h"
+#include "gpu_scene_state.h"
 #include "material.h"
 #include "model.h"
 #include "raycaster.h"
@@ -143,20 +144,22 @@ void Raycaster::buildScene() {
 }
 
 void Raycaster::uploadScene() {
-    UpdateMaterials(_materials.data(), _materials.size());
+    GPUSceneState& gpuSceneState = _gpuContext->sceneState;
+
+    gpuSceneState.updateMaterials(_materials.data(), _materials.size());
 
     // if we update CUDA's copy of the scene, we must also call AnimateScene to supply the transforms
-    UpdateSceneGeometry(*this);
+    gpuSceneState.setGeometry(*this);
 
     // TODO(anankervis): don't dynamically allocate memory here
     DynamicArray<matrix4x4> modelToWorld(_models.size());
     for (size_t i = 0; i < _models.size(); ++i)
         modelToWorld[i] = matrix4x4(_models[i]->getTransform());
-    AnimateScene(modelToWorld.data(), modelToWorld.size());
+    gpuSceneState.animate(modelToWorld.data(), modelToWorld.size());
 
-    UpdateLighting(*this);
+    gpuSceneState.updateLighting(*this);
 
-    FetchUpdatedBVH(_nodes.data());
+    gpuSceneState.fetchUpdatedBVH(_nodes.data());
 }
 
 void Raycaster::updateScene(double elapsedTime) {

@@ -16,28 +16,32 @@
 
 namespace hvvr {
 
-// Would use a HashStringMap on names, but VS2013 vs. 2015 troubles. Besides,
-// a linear array search is faster at sane camera counts
-struct GPUContext {
+// TODO(anankervis): merge with Raycaster class
+class GPUContext {
+public:
     std::vector<GPUCamera> cameras;
     GPUSceneState sceneState;
-    bool graphicsResourcesMapped = false;
+    bool graphicsResourcesMapped;
+
+    static bool cudaInit();
+    static void cudaCleanup();
+
+    GPUContext();
+    ~GPUContext();
 
     void getCudaGraphicsResources(std::vector<cudaGraphicsResource_t>& resources);
 
     // Must be called before accessing any of the dx11/cuda interop textures from cuda
-    void maybeMapResources();
-
+    void interopMapResources();
     // Must be called once done with the cuda portion of the frame to release the textures and allow them to be blitted
-    void unmapResources();
+    void interopUnmapResources();
 
     void cleanup();
 
-    // Returns a reference to the camera with the given name
-    // creating it if necessary
+    // Returns a reference to the camera with the given name, creating it if necessary
     GPUCamera& getCreateCamera(const Camera* cameraPtr, bool& created);
-};
 
-extern GPUContext* gGPUContext;
+protected:
+};
 
 } // namespace hvvr
