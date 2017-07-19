@@ -70,6 +70,19 @@ typedef struct _hvRay {
 } hvRay;
 
 
+typedef enum _hvError {
+    HV_ERROR_NONE            = 0,
+    HV_ERROR_NOT_IMPLEMENTED = 1,
+    HV_ERROR_INVALID_ARG     = 2,
+    HV_ERROR_INVALID_OP      = 3,
+} hvError;
+
+typedef void(*hvErrorCallback)(hvError error, const char* errorStr);
+
+hvError HVAPI hvGetLastError();
+void HVAPI hvSetErrorCallback(hvErrorCallback errorCallback);
+
+
 typedef enum _hvCreateSceneFlags {
     HV_CREATE_SCENE_FLAGS_NONE = 0x0,
 } hvCreateSceneFlags;
@@ -92,6 +105,10 @@ hvMesh HVAPI hvCreateMesh(
 
 void HVAPI hvDestroyMesh(hvMesh mesh);
 
+// HV_ERROR_INVALID_OP if mesh was not created with HV_CREATE_MESH_FLAGS_DYNAMIC
+void HVAPI hvUpdateMeshVertices(
+    hvMesh mesh, const hvFloat3* positions, uint32_t vertexStrideBytes);
+
 
 typedef enum _hvCreateInstanceFlags {
     HV_CREATE_INSTANCE_FLAGS_NONE    = 0x0,
@@ -103,6 +120,10 @@ hvInstance HVAPI hvCreateInstance(
     hvScene targetScene, hvMesh meshToAttach, const hvTransform* transform, uint32_t flags);
 
 void HVAPI hvDestroyInstance(hvInstance instance);
+
+// HV_ERROR_INVALID_OP if instance was not created with HV_CREATE_INSTANCE_FLAGS_DYNAMIC
+void HVAPI hvUpdateInstanceTransform(
+    hvInstance instance, const hvTransform* transform);
 
 
 typedef enum _hvCreateRayGeneratorFlags {
