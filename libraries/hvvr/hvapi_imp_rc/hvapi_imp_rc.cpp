@@ -8,3 +8,9 @@
 */
 
 #include "../hvapi/hvapi.h"
+
+extern "C" {
+
+
+
+} // extern "C"
