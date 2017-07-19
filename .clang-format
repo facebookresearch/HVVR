@@ -1,7 +1,6 @@
 ---
 DisableFormat:   false
 Language:        Cpp
-# BasedOnStyle:  Oculus Research
 
 AccessModifierOffset: -4
 AlignEscapedNewlinesLeft: false

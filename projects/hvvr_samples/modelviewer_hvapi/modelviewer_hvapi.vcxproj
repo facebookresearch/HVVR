@@ -1,0 +1,62 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Development|x64">
+      <Configuration>Development</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\libraries\hvvr\raycaster\raycaster.vcxproj">
+      <Project>{c5d565c3-8f10-41a4-980c-b233064bbd24}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\libraries\hvvr\samples_shared\samples_shared.vcxproj">
+      <Project>{5c70587f-07d4-4a9a-8b24-ee3e5c1d05e2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\libraries\hvvr\shared\shared.vcxproj">
+      <Project>{59e92266-644c-43ce-ba62-a3f51fefcf07}</Project>
+    </ProjectReference>
+	<ProjectReference Include="..\..\..\libraries\hvvr\hvapi_imp_rc\hvapi_imp_rc.vcxproj">
+      <Project>{a364f5d4-8a63-4d30-8fb0-893c0852a8c8}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="modelviewer_hvapi.cpp" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{c22a2cef-87c5-467c-afa3-554fc1764b96}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>modelviewer_hvapi</RootNamespace>
+    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+	<PlatformToolset>v140</PlatformToolset>
+	<CharacterSet>MultiByte</CharacterSet>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\..\libraries\hvvr\hvvr_common.props" />
+    <Import Project="..\..\..\libraries\hvvr\shared\shared.props" />
+    <Import Project="..\..\..\libraries\hvvr\samples_shared\samples_shared.props" />
+    <Import Project="..\..\..\libraries\hvvr\raycaster\raycaster.props" />
+	<Import Project="..\..\..\libraries\hvvr\hvapi_imp_rc\hvapi_imp_rc.props" />
+  </ImportGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

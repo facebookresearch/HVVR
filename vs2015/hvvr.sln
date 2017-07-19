@@ -11,6 +11,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shared", "..\libraries\hvvr
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "samples_shared", "..\libraries\hvvr\samples_shared\samples_shared.vcxproj", "{5C70587F-07D4-4A9A-8B24-EE3E5C1D05E2}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "hvapi_imp_rc", "..\libraries\hvvr\hvapi_imp_rc\hvapi_imp_rc.vcxproj", "{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "modelviewer_hvapi", "..\projects\hvvr_samples\modelviewer_hvapi\modelviewer_hvapi.vcxproj", "{C22A2CEF-87C5-467C-AFA3-554FC1764B96}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -42,6 +46,18 @@ Global
 		{5C70587F-07D4-4A9A-8B24-EE3E5C1D05E2}.Development|x64.Build.0 = Development|x64
 		{5C70587F-07D4-4A9A-8B24-EE3E5C1D05E2}.Release|x64.ActiveCfg = Release|x64
 		{5C70587F-07D4-4A9A-8B24-EE3E5C1D05E2}.Release|x64.Build.0 = Release|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Debug|x64.ActiveCfg = Debug|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Debug|x64.Build.0 = Debug|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Development|x64.ActiveCfg = Development|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Development|x64.Build.0 = Development|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Release|x64.ActiveCfg = Release|x64
+		{A364F5D4-8A63-4D30-8FB0-893C0852A8C8}.Release|x64.Build.0 = Release|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Debug|x64.ActiveCfg = Debug|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Debug|x64.Build.0 = Debug|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Development|x64.ActiveCfg = Development|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Development|x64.Build.0 = Development|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Release|x64.ActiveCfg = Release|x64
+		{C22A2CEF-87C5-467C-AFA3-554FC1764B96}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

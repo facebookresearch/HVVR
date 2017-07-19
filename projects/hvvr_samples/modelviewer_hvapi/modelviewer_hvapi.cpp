@@ -122,7 +122,7 @@ int __stdcall WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, char* comman
     // create a console output window
     console::createStdOutErr();
 
-    gWindow = std::make_unique<WindowD3D11>("Modelviewer", RT_WIDTH, RT_HEIGHT, resizeCallback, rawMouseInputCallback);
+    gWindow = std::make_unique<WindowD3D11>("Modelviewer hvAPI", RT_WIDTH, RT_HEIGHT, resizeCallback, rawMouseInputCallback);
     input::registerDefaultRawInputDevices(gWindow->getWindowHandle());
 
     gOnInit();
