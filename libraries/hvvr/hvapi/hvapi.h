@@ -58,15 +58,18 @@ typedef struct _hvHit {
 
 // ray batches share an aperture, so no need for an explicit per-ray origin
 typedef struct _hvRay {
-    hvFloat3 focalPoint;
+    hvFloat3 *origin;        // Optional, omitted for primary rays
+    hvFloat3 *direction;
 
     // ray footprint
-    hvFloat3 focalDeltaMajor;
-    hvFloat3 focalDeltaMinor;
+    float *dodu, *dodv;     // Optional, derivative of the origin w.r.t. u and v basis in hvRayGenParams.
+                            // Present only with finite extent of the origin (e.g., with DoF)
 
-    // What is this used for? We'll need to vary the aperture offset per-subsample, and also
-    // rotate it per-ray, but I'm not sure if there's a need for a per-ray 2D offset.
-    hvFloat2 apertureOffset;
+    float *dddu, *dodv;     // Optional, derivative of the direction w.r.t. u and v basis in hvRayGenParams.
+                            // The derivative is specified at t=1 (corresponds to a unit direction vector).
+                            // Present with finite pixel footprint and/or defocus (e.g., with DoF).
+
+    float *focalDistance;   // Optional, for tighter hourglass bounds
 } hvRay;
 
 
@@ -287,9 +290,9 @@ void HVAPI hvProcessHits(
 
 
 typedef enum _hvTraceFlags {
-    HV_TRACE_FLAGS_NONE    = 0x0,
+    HV_TRACE_FLAGS_CLOSEST_HIT  = 0x0,
     // terminate traversal on any hit instead of finding closest hit to the ray (for shadow/connection rays)
-    HV_TRACE_FLAGS_ANY_HIT = 0x1,
+    HV_TRACE_FLAGS_ANY_HIT      = 0x1,
 } hvTraceFlags;
 
 // If shadingCallback was created with HV_CREATE_HIT_CALLBACK_FLAGS_EMITS_RAYS, trace will
@@ -299,7 +302,7 @@ typedef enum _hvTraceFlags {
 void HVAPI hvTrace(
     hvScene scene, hvRayBatch rays, hvHitCallback shadingCallback, uint32_t flags);
 void HVAPI hvTraceDeferred(
-    hvScene scene, hvRayBatch rays, hvRayBatch outHits, uint32_t flags);
+    hvScene scene, hvRayBatch rays, hvRayHits outHits, uint32_t flags);
 
 #ifdef __cplusplus
 } // extern "C"
