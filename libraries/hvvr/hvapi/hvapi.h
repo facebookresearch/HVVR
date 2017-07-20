@@ -58,7 +58,7 @@ typedef struct _hvHit {
 
 // ray batches share an aperture, so no need for an explicit per-ray origin
 typedef struct _hvRay {
-    hvFloat3 *origin;        // Optional, omitted for primary rays
+    hvFloat3 *origin;       // Optional, omitted for primary rays
     hvFloat3 *direction;
 
     // ray footprint
@@ -139,10 +139,11 @@ typedef enum _hvRayGenType {
     HV_RAY_GEN_TYPE_DEVICE_BUFFER = 1, // pull rays from an array in GPU memory
     HV_RAY_GEN_TYPE_HOST_FUNC     = 2, // procedurally generate rays on the CPU
     HV_RAY_GEN_TYPE_DEVICE_FUNC   = 3, // procedurally generate rays on the GPU
-    HV_RAY_GEN_TYPE_SUBDIV_SURF   = 4, // fixed-function subdivision surface
+    HV_RAY_GEN_TYPE_REGULAR_GRID  = 4, // fixed-function regular grid of rays
+    HV_RAY_GEN_TYPE_SUBDIV_SURF   = 5, // fixed-function subdivision surface
     // rays are produced by a shading hit callback
     // the rayCount parameter to hvCreateRayBatch must be zero
-    HV_RAY_GEN_TYPE_HIT_CALLBACK  = 5,
+    HV_RAY_GEN_TYPE_HIT_CALLBACK  = 6,
 */
 } hvRayGenType;
 
@@ -163,6 +164,9 @@ typedef struct _hvRayGenConfig {
         } deviceFunc;
 
         struct {
+        } regularGrid;
+
+        struct {
         } subdivSurf;
 
         struct {
@@ -180,6 +184,8 @@ hvRayGenerator HVAPI hvCreateRayGenerator(
 void HVAPI hvDestroyRayGenerator(hvRayGenerator rayGenerator);
 
 
+// Should any of these flags move to hvCreateRayGeneratorFlags, instead?
+// Some of them may be more properties of the ray generator, than of any individual ray batch.
 typedef enum _hvCreateRayBatchFlags {
     HV_CREATE_RAY_BATCH_FLAGS_NONE                    = 0x0,
     // Do we need this? Outside of shadows, wouldn't the rays change every frame due to camera motion?
@@ -187,16 +193,18 @@ typedef enum _hvCreateRayBatchFlags {
     HV_CREATE_RAY_BATCH_FLAGS_DYNAMIC                 = 0x1,
     // all rays in the batch have a common origin (pinhole camera)
     HV_CREATE_RAY_BATCH_FLAGS_COMMON_ORIGIN           = 0x2,
-    // all rays in the batch are on a regular grid, requires HV_CREATE_RAY_BATCH_FLAGS_COMMON_ORIGIN
-    HV_CREATE_RAY_BATCH_FLAGS_REGULAR_GRID            = 0x4,
+
+    // Flags specifying ray ordering/grouping. Place at higher bits, or make a separate set of flags?
+
     // source rays are pre-grouped into coherent clusters in a two-level hierarchy:
     // 128 rays per tile
     // 64 tiles per block
-    HV_CREATE_RAY_BATCH_FLAGS_ORDERED_TILE128_BLOCK64 = 0x8,
+    HV_CREATE_RAY_BATCH_FLAGS_ORDERED_TILE128_BLOCK64 = 0x4,
 } hvCreateRayBatchFlags;
 
 typedef struct _hvRayGenParams {
     hvFloat3 origin;
+    // Note: radius is not needed if the rays have an aperture offset
     hvFloat3 apertureTangent;
     hvFloat3 apertureBiTangent;
 
