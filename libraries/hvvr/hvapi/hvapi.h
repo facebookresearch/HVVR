@@ -65,7 +65,7 @@ typedef struct _hvRay {
     float *dodu, *dodv;     // Optional, derivative of the origin w.r.t. u and v basis in hvRayGenParams.
                             // Present only with finite extent of the origin (e.g., with DoF)
 
-    float *dddu, *dodv;     // Optional, derivative of the direction w.r.t. u and v basis in hvRayGenParams.
+    float *dddu, *dddv;     // Optional, derivative of the direction w.r.t. u and v basis in hvRayGenParams.
                             // The derivative is specified at t=1 (corresponds to a unit direction vector).
                             // Present with finite pixel footprint and/or defocus (e.g., with DoF).
 
