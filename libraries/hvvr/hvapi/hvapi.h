@@ -23,15 +23,16 @@ extern "C" {
 #endif
 
 // opaque types
-typedef struct _hvMesh* hvMesh;
 typedef struct _hvScene* hvScene;
+typedef struct _hvMesh* hvMesh;
 typedef struct _hvRayBatch* hvRayBatch;
 typedef struct _hvRayGenerator* hvRayGenerator;
 typedef struct _hvRayHits* hvRayHits;
 typedef struct _hvHitCallback* hvHitCallback;
 
 // exposed types
-typedef uint32_t hvInstance;
+typedef uint32_t hvInstanceID;
+#define HV_INVALID_INSTANCE 0xffffffff
 
 typedef struct _hvFloat2 {
     float x, y;
@@ -52,24 +53,25 @@ typedef struct _hvTransform {
 } hvTransform;
 
 typedef struct _hvHit {
-    hvInstance instance;
+    hvInstanceID instance;
     uint32_t triangleIndex;
 } hvHit;
 
 // ray batches share an aperture, so no need for an explicit per-ray origin
 typedef struct _hvRay {
-    hvFloat3 *origin;       // Optional, omitted for primary rays
-    hvFloat3 *direction;
+    hvFloat3 origin;       // Optional, omitted for primary rays
+    hvFloat3 direction;
 
+// note - Anton to pick naming, mirror from doc
     // ray footprint
-    float *dodu, *dodv;     // Optional, derivative of the origin w.r.t. u and v basis in hvRayGenParams.
+    hvFloat3 dOrigin_du, DOriginDv;     // Optional, derivative of the origin w.r.t. u and v basis in hvRayGenParams.
                             // Present only with finite extent of the origin (e.g., with DoF)
 
-    float *dddu, *dddv;     // Optional, derivative of the direction w.r.t. u and v basis in hvRayGenParams.
+    hvFloat3 DDirectionDu, DDirectionDv;     // Optional, derivative of the direction w.r.t. u and v basis in hvRayGenParams.
                             // The derivative is specified at t=1 (corresponds to a unit direction vector).
                             // Present with finite pixel footprint and/or defocus (e.g., with DoF).
 
-    float *focalDistance;   // Optional, for tighter hourglass bounds
+    float focalDistance;   // Optional, for tighter hourglass bounds
 } hvRay;
 
 
@@ -119,14 +121,14 @@ typedef enum _hvCreateInstanceFlags {
 } hvCreateInstanceFlags;
 
 // do we specify instance transform as quaternion+pos+scale, or as a 4x3 matrix, or?
-hvInstance HVAPI hvCreateInstance(
-    hvScene targetScene, hvMesh meshToAttach, const hvTransform* transform, uint32_t flags);
+hvInstanceID HVAPI hvCreateInstance(
+    hvScene scene, hvMesh meshToAttach, const hvTransform* transform, uint32_t flags);
 
-void HVAPI hvDestroyInstance(hvInstance instance);
+void HVAPI hvDestroyInstance(hvScene scene, hvInstanceID instanceID);
 
 // HV_ERROR_INVALID_OP if instance was not created with HV_CREATE_INSTANCE_FLAGS_DYNAMIC
 void HVAPI hvUpdateInstanceTransform(
-    hvInstance instance, const hvTransform* transform);
+    hvScene scene, hvInstanceID instanceID, const hvTransform* transform);
 
 
 typedef enum _hvCreateRayGeneratorFlags {
