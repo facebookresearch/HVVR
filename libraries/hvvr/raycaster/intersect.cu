@@ -27,12 +27,12 @@ enum : uint32_t { badTriIndex = ~uint32_t(0) };
 // returns zero if, for the entire warp, all lanes hit 1 triangle or 0 triangles - the fast path, a single gbuffer entry
 // returns the number of unique triangles for each thread
 // note that 1 of the unique triangle count will be badTriIndex if one or more subsamples don't hit a triangle
-template <uint32_t MSAARate, uint32_t BlockSize>
+template <uint32_t AARate, uint32_t BlockSize>
 CUDA_DEVICE int EmitGBuffer(int laneIndex, const uint32_t* sampleTriIndex, RaycasterGBufferSubsample* gBufferWarp) {
     // fast path if all lanes hit 1 triangle
     bool oneTri = true;
     uint32_t triIndex0 = sampleTriIndex[0];
-    for (int i = 1; i < MSAARate; i++) {
+    for (int i = 1; i < AARate; i++) {
         if (triIndex0 != sampleTriIndex[i]) {
             oneTri = false;
         }
@@ -44,32 +44,32 @@ CUDA_DEVICE int EmitGBuffer(int laneIndex, const uint32_t* sampleTriIndex, Rayca
         // not necessarily the same triangle across threads, though
         RaycasterGBufferSubsample gBufferSample;
         gBufferSample.triIndex = sampleTriIndex[0];
-        gBufferSample.sampleMask = (1 << MSAARate) - 1;
+        gBufferSample.sampleMask = RaycasterGBufferSubsample::getSampleMaskAll<AARate>();
 
         gBufferWarp[laneIndex] = gBufferSample;
 
         return 0;
     } else {
         // group hits on the same triangle together, and misses (badTriIndex) at the end
-        uint32_t sortKeys[MSAARate];
+        uint32_t sortKeys[AARate];
         // max triIndex is 134217728 - 1 ... seems a reasonable cap for now (triangle data would exceed the VRAM of most
         // GPUs) max samples is 32
         enum { sortKeySampleBits = 5 }; // this sort and gbuffer compression (sampleMask) assume <= 32 samples
         enum { sortKeySampleMask = (1 << sortKeySampleBits) - 1 };
         enum { sortKeyIndexBits = 32 - sortKeySampleBits };
-        static_assert(MSAARate <= (1 << sortKeySampleBits),
-                      "triangle sample sort and gbuffer compression assume a maximum MSAARate");
-        for (int i = 0; i < MSAARate; i++) {
+        static_assert(AARate <= (1 << sortKeySampleBits),
+                      "triangle sample sort and gbuffer compression assume a maximum AARate");
+        for (int i = 0; i < AARate; i++) {
             sortKeys[i] = (sampleTriIndex[i] << sortKeySampleBits) | i;
         }
-        sortBitonic(sortKeys, MSAARate);
+        sortBitonic(sortKeys, AARate);
 
         // scan and reduce down to pairs of (triIndex, sampleMask)
         RaycasterGBufferSubsample gBufferSample;
         gBufferSample.triIndex = int32_t(sortKeys[0]) >> sortKeySampleBits; // shift with sign fill
         gBufferSample.sampleMask = 1 << (sortKeys[0] & sortKeySampleMask);
         int compTriCount = 1;
-        for (int i = 1; i < MSAARate; i++) {
+        for (int i = 1; i < AARate; i++) {
             uint32_t triIndex = int32_t(sortKeys[i]) >> sortKeySampleBits;
             uint32_t triMask = 1 << (sortKeys[i] & sortKeySampleMask);
 
@@ -90,7 +90,7 @@ CUDA_DEVICE int EmitGBuffer(int laneIndex, const uint32_t* sampleTriIndex, Rayca
     }
 }
 
-template <uint32_t MSAARate, uint32_t BlockSize>
+template <uint32_t AARate, uint32_t BlockSize>
 struct TriCache {
     enum { maxSize = BlockSize };
 
@@ -112,17 +112,17 @@ struct TriCache {
         TileDataDoF tileDoF;
     };
 
-    uint32_t sampleTriIndex[BlockSize * MSAARate];
+    uint32_t sampleTriIndex[BlockSize * AARate];
 };
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
 CUDA_DEVICE void IntersectSamples(const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
                                   SampleInfo sampleInfo,
                                   const UnpackedDirectionalSample& sample,
                                   matrix4x4 sampleToWorld,
                                   const vector2* CUDA_RESTRICT tileSubsampleLensPos,
                                   uint32_t sampleOffset,
-                                  TriCache<MSAARate, BlockSize>& triCache,
+                                  TriCache<AARate, BlockSize>& triCache,
                                   int triCount,
                                   float* sampleTMax) {
     UnpackedSample sample2D = GetFullSample(sampleOffset, sampleInfo);
@@ -138,11 +138,11 @@ CUDA_DEVICE void IntersectSamples(const PrecomputedTriangleIntersect* CUDA_RESTR
             IntersectTriangleThreadDoF triThreadDoF(triTileDoF, lensCenterToFocalCenter);
 
 #pragma unroll
-            for (int i = 0; i < MSAARate; ++i) {
+            for (int i = 0; i < AARate; ++i) {
                 vector2 lensUV;
                 vector2 dirUV;
-                GetSampleUVsDoF<MSAARate, BlockSize>(tileSubsampleLensPos, sampleInfo.frameJitter,
-                                                     triCache.tileDoF.focalToLensScale, i, lensUV, dirUV);
+                GetSampleUVsDoF<AARate, BlockSize>(tileSubsampleLensPos, sampleInfo.frameJitter,
+                                                   triCache.tileDoF.focalToLensScale, i, lensUV, dirUV);
 
                 if (triThreadDoF.test(triTileDoF, lensCenterToFocalCenter, triCache.tileDoF.lensU,
                                       triCache.tileDoF.lensV, lensUV, dirUV, sampleTMax[i])) {
@@ -156,8 +156,8 @@ CUDA_DEVICE void IntersectSamples(const PrecomputedTriangleIntersect* CUDA_RESTR
             IntersectTriangleThread triThread(triTile, sample.centerDir);
 
 #pragma unroll
-            for (int i = 0; i < MSAARate; ++i) {
-                vector2 alpha = getSubsampleUnitOffset<MSAARate>(sampleInfo.frameJitter, i);
+            for (int i = 0; i < AARate; ++i) {
+                vector2 alpha = getSubsampleUnitOffset<AARate>(sampleInfo.frameJitter, i);
 
                 if (triThread.test(triTile, alpha, sampleTMax[i])) {
                     // ray intersected triangle and passed depth test, sampleTMax[i] has been updated
@@ -170,7 +170,7 @@ CUDA_DEVICE void IntersectSamples(const PrecomputedTriangleIntersect* CUDA_RESTR
 }
 
 // intersect a whole tile of rays
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
 CUDA_DEVICE void IntersectTile(SampleInfo sampleInfo,
                                matrix4x4 sampleToWorld,
                                matrix3x3 sampleToCamera,
@@ -180,7 +180,7 @@ CUDA_DEVICE void IntersectTile(SampleInfo sampleInfo,
                                const PrecomputedTriangleIntersect* CUDA_RESTRICT trianglesIntersect,
                                uint32_t sampleOffset,
                                TileTriRange triRange,
-                               TriCache<MSAARate, BlockSize>& sMemTriCache,
+                               TriCache<AARate, BlockSize>& sMemTriCache,
                                float* sampleTMax) {
     // TODO: switch to full 3D sample to allow different directions per subsample
     UnpackedDirectionalSample sample =
@@ -197,7 +197,7 @@ CUDA_DEVICE void IntersectTile(SampleInfo sampleInfo,
         // make sure there is a __syncthreads somewhere between here and first use (tri cache init, for example)
     }
 
-    for (int i = 0; i < MSAARate; i++) {
+    for (int i = 0; i < AARate; i++) {
         sampleTMax[i] = FLT_MAX;
         sMemTriCache.sampleTriIndex[i * BlockSize + threadIdx.x] = badTriIndex;
     }
@@ -288,9 +288,9 @@ CUDA_DEVICE void IntersectTile(SampleInfo sampleInfo,
         }
         __syncthreads();
 
-        IntersectSamples<MSAARate, BlockSize, EnableDoF>(trianglesIntersect, sampleInfo, sample, sampleToWorld,
-                                                         tileSubsampleLensPos, sampleOffset, sMemTriCache, outputCount,
-                                                         sampleTMax);
+        IntersectSamples<AARate, BlockSize, EnableDoF>(trianglesIntersect, sampleInfo, sample, sampleToWorld,
+                                                       tileSubsampleLensPos, sampleOffset, sMemTriCache, outputCount,
+                                                       sampleTMax);
 
         // TODO(anankervis): for some reason, this is needed to prevent corruption when storing sampleTriIndex in sMem
         __syncthreads();
@@ -298,14 +298,14 @@ CUDA_DEVICE void IntersectTile(SampleInfo sampleInfo,
 }
 
 // remember to __syncthreads() before aliasing sMem
-template <uint32_t MSAARate, uint32_t BlockSize>
+template <uint32_t AARate, uint32_t BlockSize>
 union IntersectTileSharedMem {
-    TriCache<MSAARate, BlockSize> triCache;
+    TriCache<AARate, BlockSize> triCache;
 
     IntersectTileSharedMem(){};
 };
 
-template <uint32_t MSAARate, uint32_t BlockSize, bool EnableDoF>
+template <uint32_t AARate, uint32_t BlockSize, bool EnableDoF>
 CUDA_KERNEL void IntersectKernel(RaycasterGBufferSubsample* gBuffer,
                                  SampleInfo sampleInfo,
                                  matrix4x4 sampleToWorld,
@@ -327,7 +327,7 @@ CUDA_KERNEL void IntersectKernel(RaycasterGBufferSubsample* gBuffer,
     // grab the range of indirect triangle indices this block is expected to process
     TileTriRange triRange = tileTriRanges[compactedTileIndex];
 
-    __shared__ IntersectTileSharedMem<MSAARate, BlockSize> sMem;
+    __shared__ IntersectTileSharedMem<AARate, BlockSize> sMem;
     if (threadIdx.x == 0) {
         SimpleRayFrustum frustumRays = tileFrusta[tileIndex];
         sMem.triCache.frustumRays = frustumRays;
@@ -335,13 +335,13 @@ CUDA_KERNEL void IntersectKernel(RaycasterGBufferSubsample* gBuffer,
         // make sure there is a __syncthreads somewhere between here and first use (tri cache init, for example)
     }
 
-    float sampleTMax[MSAARate];
-    IntersectTile<MSAARate, BlockSize, EnableDoF>(sampleInfo, sampleToWorld, sampleToCamera, cameraToWorld,
-                                                  tileSubsampleLensPos, triIndices, trianglesIntersect, sampleOffset,
-                                                  triRange, sMem.triCache, sampleTMax);
+    float sampleTMax[AARate];
+    IntersectTile<AARate, BlockSize, EnableDoF>(sampleInfo, sampleToWorld, sampleToCamera, cameraToWorld,
+                                                tileSubsampleLensPos, triIndices, trianglesIntersect, sampleOffset,
+                                                triRange, sMem.triCache, sampleTMax);
 
-    uint32_t sampleTriIndex[MSAARate];
-    for (int i = 0; i < MSAARate; i++) {
+    uint32_t sampleTriIndex[AARate];
+    for (int i = 0; i < AARate; i++) {
         sampleTriIndex[i] = sMem.triCache.sampleTriIndex[i * BlockSize + threadIdx.x];
     }
 
@@ -350,8 +350,8 @@ CUDA_KERNEL void IntersectKernel(RaycasterGBufferSubsample* gBuffer,
     // GBuffer texels are organized so that each subsample is a warp stride away from
     // the previous subsample for a single sample, so that warps can coalesce memory reads
     uint32_t warpIndex = sampleOffset / WARP_SIZE;
-    uint32_t warpOffset = warpIndex * WARP_SIZE * MSAARate;
-    EmitGBuffer<MSAARate, BlockSize>(laneGetIndex(), sampleTriIndex, gBuffer + warpOffset);
+    uint32_t warpOffset = warpIndex * WARP_SIZE * AARate;
+    EmitGBuffer<AARate, BlockSize>(laneGetIndex(), sampleTriIndex, gBuffer + warpOffset);
 }
 
 #if PROFILE_INTERSECT
@@ -419,7 +419,7 @@ void GPUCamera::intersect(GPUSceneState& sceneState, const SampleInfo& sampleInf
 #endif
 }
 
-template <uint32_t MSAARate>
+template <uint32_t AARate>
 CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
                                 SampleInfo sampleInfo,
                                 matrix4x4 sampleToWorld,
@@ -430,7 +430,7 @@ CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
                                 int* sampleRemap,
                                 bool outputScanlineOrder) {
     uint32_t sampleOffset = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t outputOffset = sampleOffset * MSAARate;
+    uint32_t outputOffset = sampleOffset * AARate;
     if (sampleOffset < sampleCount) {
         if (outputScanlineOrder) {
             sampleOffset = sampleRemap[sampleOffset];
@@ -441,14 +441,14 @@ CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
         UnpackedDirectionalSample sample3D =
             GetDirectionalSample3D(sampleOffset, sampleInfo, sampleToWorld, sampleToCamera, cameraToWorld);
 
-        for (int i = 0; i < MSAARate; ++i) {
-            vector2 alpha = getSubsampleUnitOffset<MSAARate>(sampleInfo.frameJitter, i);
+        for (int i = 0; i < AARate; ++i) {
+            vector2 alpha = getSubsampleUnitOffset<AARate>(sampleInfo.frameJitter, i);
             vector3 dir =
                 normalize(sample3D.centerDir + sample3D.majorDirDiff * alpha.x + sample3D.minorDirDiff * alpha.y);
             vector3 pos = vector3(cameraToWorld * vector4(0, 0, 0, 1));
             if (sampleInfo.lens.radius > 0.0f) {
                 // TODO: implement
-                /*SampleDoF sampleDoF = GetSampleDoF<MSAARate, TILE_SIZE>(sampleOffset, i, sampleInfo, sampleToCamera,
+                /*SampleDoF sampleDoF = GetSampleDoF<AARate, TILE_SIZE>(sampleOffset, i, sampleInfo, sampleToCamera,
                 cameraToWorld, tileSubsampleLensPos);
                 pos = sampleDoF.pos;
                 dir = sampleDoF.dir;*/

@@ -9,6 +9,8 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include "cuda_decl.h"
+
 #include <stdint.h>
 
 namespace hvvr {
@@ -17,6 +19,11 @@ namespace hvvr {
 struct RaycasterGBufferSubsample {
     uint32_t triIndex;
     uint32_t sampleMask;
+
+    template <uint32_t AARate>
+    CUDA_HOST_DEVICE static constexpr uint32_t getSampleMaskAll() {
+        return (AARate < 32) ? ((uint32_t(1) << AARate) - 1) : ~uint32_t(0);
+    }
 };
 
 } // namespace hvvr

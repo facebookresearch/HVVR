@@ -36,6 +36,7 @@ static const unsigned MAX_DIRECTIONAL_LIGHTS = 1;
 static const unsigned MAX_POINT_LIGHTS = 4;
 static const unsigned MAX_SPOT_LIGHTS = 4;
 
+// max supported is 32x
 static const unsigned COLOR_MODE_MSAA_RATE = 16;
 
 } // namespace hvvr

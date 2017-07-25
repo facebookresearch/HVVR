@@ -63,7 +63,7 @@ CUDA_DEVICE vector4 ShadeSSAA(ResolveSMem& sMem,
     vector4 result = vector4(0.0f, 0.0f, 0.0f, 0.0f);
     uint32_t combinedSampleMask = 0;
     for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
-        if (combinedSampleMask == (1 << AARate) - 1) {
+        if (combinedSampleMask == RaycasterGBufferSubsample::getSampleMaskAll<AARate>()) {
             // all samples accounted for, nothing left to shade
             break;
         }
@@ -185,7 +185,7 @@ CUDA_DEVICE vector4 ShadeMSAA(ResolveSMem& sMem,
     vector4 result = vector4(0.0f, 0.0f, 0.0f, 0.0f);
     uint32_t combinedSampleMask = 0;
     for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
-        if (combinedSampleMask == (1 << AARate) - 1) {
+        if (combinedSampleMask == RaycasterGBufferSubsample::getSampleMaskAll<AARate>()) {
             // all samples accounted for, nothing left to shade
             break;
         }
@@ -394,7 +394,7 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
         float tMaxValue = CUDA_INF;
         uint32_t combinedSampleMask = 0;
         for (int compGbufferSlot = 0; compGbufferSlot < AARate; compGbufferSlot++) {
-            if (combinedSampleMask == (1 << AARate) - 1) {
+            if (combinedSampleMask == RaycasterGBufferSubsample::getSampleMaskAll<AARate>()) {
                 // all samples accounted for, nothing left to shade
                 break;
             }
