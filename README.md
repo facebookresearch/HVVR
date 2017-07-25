@@ -74,6 +74,11 @@ Converting an FBX scene to .BIN to improve startup time:
 5. Change MODEL_CONVERT back to 0
 6. Update the enum SimpleviewerScene to add your scene to the list, and add camera and scenePath settings to gOnInit()
 
+Benchmarking vs other raytracers:
+1. Set DISABLE_MOVEMENT to 1 to ensure consistent output
+2. Enable export of the scene and rays in libraries/hvvr/raycaster/render.cpp
+3. Import the scene and rays to https://github.com/Mx7f/RaytraceBenchmarking
+
 ## Join the HVVR community
 See the CONTRIBUTING file for how to help out.
 
