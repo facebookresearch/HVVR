@@ -238,7 +238,7 @@ public:
                                     const matrix3x3& sampleToEye);
 
     // dump the current set of rays (including subsamples) to a CPU buffer
-    void dumpRays(std::vector<SimpleRay>& rays);
+    void dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder);
 
 protected:
 

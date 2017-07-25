@@ -10,11 +10,18 @@
 #include "camera.h"
 #include "gpu_camera.h"
 #include "gpu_context.h"
+#include "model.h"
 #include "raycaster.h"
 #include "raycaster_common.h"
+#include "timer.h"
 #include "thread_pool.h"
 
 #define DUMP_SCENE_AND_RAYS 0
+ // If disabled, rays are blocked the same way they are during tracing, 
+ // which should improve coherence but makes visualization more difficult
+#define DUMP_IN_SCANLINE_ORDER 0
+// dump in binary or text format?
+#define DUMP_BINARY 1
 
 namespace hvvr {
 
@@ -35,6 +42,18 @@ static void dumpRaysToRFF(const std::string& filename, const std::vector<SimpleR
         }
     }
 
+    assert(rays.size() <= INT_MAX);
+
+#if DUMP_BINARY
+    FILE* file = fopen((filename + "b").c_str(), "wb");
+    char header[4] = {'R', 'F', 'F', 'b'};
+    fwrite(header, sizeof(header), 1, file);
+
+    int rayCount = int(culledRays.size());
+    fwrite(&rayCount, sizeof(rayCount), 1, file);
+    fwrite(rays.data(), sizeof(SimpleRay) * rayCount, 1, file);
+    fclose(file);
+#else
     FILE* file = fopen(filename.c_str(), "w");
     fprintf(file, "RFF\n");
     fprintf(file, "%d\n", (int)culledRays.size());
@@ -43,6 +62,7 @@ static void dumpRaysToRFF(const std::string& filename, const std::vector<SimpleR
                 r.direction.y, r.direction.z);
     }
     fclose(file);
+#endif
 }
 
 // http://segeval.cs.princeton.edu/public/off_format.html
@@ -54,17 +74,54 @@ static void dumpRaysToRFF(const std::string& filename, const std::vector<SimpleR
 // NVertices v1 v2 v3 ... vN
 // MVertices v1 v2 v3 ... vM
 //... numFaces like above
-static void dumpSceneToOFF(const std::string& filename, SceneState s) {
+static void dumpSceneToOFF(const std::string& filename, const std::vector<std::unique_ptr<Model>>& models) {
+    std::vector<vector3> vertices;
+    std::vector<uint3> tris;
+    for (uint32_t modelIndex = 0; modelIndex < uint32_t(models.size()); modelIndex++) {
+        const Model& model = *(models[modelIndex]);
+        const MeshData& meshData = model.getMesh();
+        for (const auto& t : meshData.triShade) {
+            uint32_t curVertexCount = uint32_t(vertices.size());
+            tris.push_back(
+                {t.indices[0] + curVertexCount, t.indices[1] + curVertexCount, t.indices[2] + curVertexCount});
+        }
+        for (const auto& v : meshData.verts) {
+            vector4 p = model.getTransform() * vector4(v.pos, 1.0);
+            vertices.push_back(vector3(p));
+        }
+    }
+
+    assert(vertices.size() <= INT_MAX);
+    assert(tris.size() <= INT_MAX);
+
+#if DUMP_BINARY
+    FILE* file = fopen((filename + "b").c_str(), "wb");
+    char header[4] = {'O', 'F', 'F', 'b'};
+    fwrite(header, sizeof(header), 1, file);
+
+    int vertexCount = int(vertices.size());
+    int triCount = int(tris.size());
+    int edgeCount = 0;
+    fwrite(&vertexCount, sizeof(vertexCount), 1, file);
+    fwrite(&triCount, sizeof(triCount), 1, file);
+    fwrite(&edgeCount, sizeof(edgeCount), 1, file);
+
+    fwrite(vertices.data(), sizeof(vector3) * vertexCount, 1, file);
+    // note - assuming 3 vertices per polygon (triangles)
+    fwrite(tris.data(), sizeof(uint3) * triCount, 1, file);
+    fclose(file);
+#else
     FILE* file = fopen(filename.c_str(), "w");
     fprintf(file, "OFF\n");
-    fprintf(file, "%d %d %d\n", (int)s.vertices.size, (int)s.trianglesShade.size, 0);
-    for (auto v : s.vertices) {
+    fprintf(file, "%d %d %d\n", (int)vertices.size(), (int)tris.size(), 0);
+    for (auto v : vertices) {
         fprintf(file, "%f %f %f\n", v[0], v[1], v[2]);
     }
-    for (auto t : s.trianglesShade) {
-        fprintf(file, "3 %d %d %d\n", (int)t.indices[0], (int)t.indices[1], (int)t.indices[2]);
+    for (auto t : tris) {
+        fprintf(file, "3 %d %d %d\n", (int)t.x, (int)t.y, (int)t.z);
     }
     fclose(file);
+#endif
 }
 #endif // DUMP_SCENE_AND_RAYS
 
@@ -219,10 +276,17 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
 #if DUMP_SCENE_AND_RAYS
             static bool dumped = false;
             if (!dumped) {
-                dumpSceneToOFF("scene_dump.off", _bvhScene);
+                Timer timer;
+
+                dumpSceneToOFF("scene_dump.off", _models);
+
                 std::vector<SimpleRay> rays;
-                CreateExplicitRayBuffer(camera.get(), rays);
+                gpuCamera->dumpRays(rays, DUMP_IN_SCANLINE_ORDER == 1);
                 dumpRaysToRFF("ray_dump.rff", rays);
+
+                double dumpTime = timer.get();
+                printf("dump time %f\n", dumpTime);
+
                 dumped = true;
             }
 #endif

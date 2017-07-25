@@ -426,24 +426,34 @@ CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
                                 matrix3x3 sampleToCamera,
                                 matrix4x4 cameraToWorld,
                                 const vector2* CUDA_RESTRICT tileSubsampleLensPos,
-                                int sampleCount) {
+                                int sampleCount,
+                                int* sampleRemap,
+                                bool outputScanlineOrder) {
     uint32_t sampleOffset = blockIdx.x * blockDim.x + threadIdx.x;
+    uint32_t outputOffset = sampleOffset * MSAARate;
     if (sampleOffset < sampleCount) {
+        if (outputScanlineOrder) {
+            sampleOffset = sampleRemap[sampleOffset];
+            if (sampleOffset >= sampleCount) {
+                return;
+            }
+        }
         UnpackedDirectionalSample sample3D =
             GetDirectionalSample3D(sampleOffset, sampleInfo, sampleToWorld, sampleToCamera, cameraToWorld);
 
         for (int i = 0; i < MSAARate; ++i) {
             vector2 alpha = getSubsampleUnitOffset<MSAARate>(sampleInfo.frameJitter, i);
-            vector3 dir = sample3D.centerDir + sample3D.majorDirDiff * alpha.x + sample3D.minorDirDiff * alpha.y;
+            vector3 dir =
+                normalize(sample3D.centerDir + sample3D.majorDirDiff * alpha.x + sample3D.minorDirDiff * alpha.y);
             vector3 pos = vector3(cameraToWorld * vector4(0, 0, 0, 1));
             if (sampleInfo.lens.radius > 0.0f) {
                 // TODO: implement
                 /*SampleDoF sampleDoF = GetSampleDoF<MSAARate, TILE_SIZE>(sampleOffset, i, sampleInfo, sampleToCamera,
-                                                                        cameraToWorld, tileSubsampleLensPos);
+                cameraToWorld, tileSubsampleLensPos);
                 pos = sampleDoF.pos;
                 dir = sampleDoF.dir;*/
             }
-            uint32_t index = sampleOffset * MSAARate + i;
+            uint32_t index = outputOffset + i;
             rayBuffer[index].direction.x = dir.x;
             rayBuffer[index].direction.y = dir.y;
             rayBuffer[index].direction.z = dir.z;
@@ -454,18 +464,18 @@ CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
     }
 }
 
-void GPUCamera::dumpRays(std::vector<SimpleRay>& rays) {
-    uint32_t rayCount = COLOR_MODE_MSAA_RATE * sampleCount;
+void GPUCamera::dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder) {
+    uint32_t rayCount = COLOR_MODE_MSAA_RATE * validSampleCount;
     GPUBuffer<SimpleRay> d_rays(rayCount);
     rays.resize(rayCount);
 
     SampleInfo sampleInfo(*this);
-    uint32_t tileCount = (sampleCount + TILE_SIZE - 1) / TILE_SIZE;
+    uint32_t tileCount = (validSampleCount + TILE_SIZE - 1) / TILE_SIZE;
 
     KernelDim dim(tileCount * TILE_SIZE, TILE_SIZE);
-    DumpRaysKernel<COLOR_MODE_MSAA_RATE>
-        <<<dim.grid, dim.block, 0, stream>>>(d_rays, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera),
-                                             sampleToCamera, cameraToWorld, d_tileSubsampleLensPos.data(), sampleCount);
+    DumpRaysKernel<COLOR_MODE_MSAA_RATE><<<dim.grid, dim.block, 0, stream>>>(
+        d_rays, sampleInfo, cameraToWorld * matrix4x4(sampleToCamera), sampleToCamera, cameraToWorld,
+        d_tileSubsampleLensPos.data(), validSampleCount, d_sampleRemap.data(), outputScanlineOrder);
 
     d_rays.readback(rays.data());
 }
