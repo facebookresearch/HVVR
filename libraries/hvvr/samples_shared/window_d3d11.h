@@ -39,6 +39,9 @@ public:
         return _height;
     }
 
+    ID3D11Device* getDevice() const {
+        return _device;
+    }
     ID3D11DeviceContext* getContext() const {
         return _context;
     }

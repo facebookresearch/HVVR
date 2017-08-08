@@ -173,9 +173,10 @@ void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
                              uint32_t imageHeight,
                              uint32_t imageStride,
                              uint32_t _splitColorSamples) {
+    splitColorSamples = _splitColorSamples;
     // one sample per output pixel, one sample per pentile subpixel, or one sample per R,G,B channel
     assert(splitColorSamples == 1 || splitColorSamples == 2 || splitColorSamples == 3);
-    splitColorSamples = _splitColorSamples;
+
     validSampleCount = imageWidth * imageHeight * splitColorSamples;
     d_sampleRemap = GPUBuffer<int32_t>(sampleRemap, sampleRemap + validSampleCount);
     sampleCount = _sampleCount;
