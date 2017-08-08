@@ -40,7 +40,7 @@
 #define GAZE_CURSOR_MODE_NONE 0 // eye direction is locked forward
 #define GAZE_CURSOR_MODE_MOUSE 1 // eye direction is set by clicking the mouse on the window
 #define GAZE_CURSOR_MODE GAZE_CURSOR_MODE_NONE
-enum SimpleviewerScene {
+enum ModelviewerScene {
     scene_home = 0,
     scene_bunny,
     scene_conference,
@@ -49,12 +49,7 @@ enum SimpleviewerScene {
     SceneCount
 };
 // which scene to load?
-static SimpleviewerScene gSceneSelect = scene_sponza;
-
-// conversion from FBX to BIN
-#if MODEL_IMPORT_ENABLE_FBX
-# define MODEL_CONVERT 0
-#endif
+static ModelviewerScene gSceneSelect = scene_sponza;
 
 #define RT_WIDTH 2160
 #define RT_HEIGHT 1200
@@ -215,20 +210,11 @@ void gOnInit() {
     gCamera->setFocalDepth(focalDistance);
     resizeCallback(); // make sure we bind a render target and some samples to the camera
 
-#if MODEL_CONVERT
-    scenePath = sceneBasePath + "sponza.fbx";
-    std::string savePath = sceneBasePath + "sponza.bin";
-#endif
     // load the scene
     model_import::Model importedModel;
     if (!model_import::load(scenePath.c_str(), importedModel)) {
         hvvr::fail("failed to load model %s", scenePath.c_str());
     }
-#if MODEL_CONVERT
-    if (!model_import::saveBin(savePath.c_str(), importedModel)) {
-        hvvr::fail("failed to save model %s", savePath.c_str());
-    }
-#endif
 
     // apply scaling
     for (auto& mesh : importedModel.meshes) {
@@ -352,7 +338,7 @@ void gOnMain() {
                    "\n",
                    fastestFrame.rayCount / fastestFrame.deltaTime / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
                    fastestFrame.rayCount / frameTimeAvg / 1000000.0f * hvvr::COLOR_MODE_MSAA_RATE,
-                   fastestFrame.deltaTime * 1000, frameTimeAvg * 1000, uint32_t(fastestFrame.rayCount),
+                   fastestFrame.deltaTime * 1000, frameTimeAvg * 1000, fastestFrame.rayCount,
                    hvvr::COLOR_MODE_MSAA_RATE);
         }
         frameStatsPos = (frameStatsPos + 1) % frameStatsWindowSize;

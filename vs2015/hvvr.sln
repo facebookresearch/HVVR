@@ -5,6 +5,8 @@ VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "raycaster", "..\libraries\hvvr\raycaster\raycaster.vcxproj", "{C5D565C3-8F10-41A4-980C-B233064BBD24}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "modelconvert", "..\projects\hvvr_samples\modelconvert\modelconvert.vcxproj", "{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "modelviewer", "..\projects\hvvr_samples\modelviewer\modelviewer.vcxproj", "{8642F14E-26E1-4F10-883B-B95C88653147}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shared", "..\libraries\hvvr\shared\shared.vcxproj", "{59E92266-644C-43CE-BA62-A3F51FEFCF07}"
@@ -24,6 +26,12 @@ Global
 		{C5D565C3-8F10-41A4-980C-B233064BBD24}.Development|x64.Build.0 = Development|x64
 		{C5D565C3-8F10-41A4-980C-B233064BBD24}.Release|x64.ActiveCfg = Release|x64
 		{C5D565C3-8F10-41A4-980C-B233064BBD24}.Release|x64.Build.0 = Release|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Debug|x64.ActiveCfg = Debug|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Debug|x64.Build.0 = Debug|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Development|x64.ActiveCfg = Development|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Development|x64.Build.0 = Development|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Release|x64.ActiveCfg = Release|x64
+		{B82CA628-EB82-41A6-BFF2-9DA5FCA895BB}.Release|x64.Build.0 = Release|x64
 		{8642F14E-26E1-4F10-883B-B95C88653147}.Debug|x64.ActiveCfg = Debug|x64
 		{8642F14E-26E1-4F10-883B-B95C88653147}.Debug|x64.Build.0 = Debug|x64
 		{8642F14E-26E1-4F10-883B-B95C88653147}.Development|x64.ActiveCfg = Development|x64

@@ -31,7 +31,7 @@ If enabling the FBX import path, you'll need to install the FBX SDK, and you'll 
 To convert and load your own scenes:
 1. Enable FBX import in HVVR/libraries/hvvr/samples_shared/model_import.h by setting MODEL_IMPORT_ENABLE_FBX to 1
 2. Change the value of scenePath in gOnInit() in HVVR/projects/hvvr_samples/modelviewer/modelviewer.cpp to point at your FBX file
-3. (Optionally, you can also export the FBX file to .bin for faster loading in the future, see the "MODEL_CONVERT" macro)
+3. (Optionally, you can also convert the FBX file to .bin for faster loading in the future, see the modelconvert project)
 
 ## Full documentation
 Some installations of the CUDA SDK and Visual Studio integration appear to have broken build dependency tracking. If you're seeing behavior after code modification that looks like stale code from header files referenced in .cu files, try cleaning the solution and building from scratch (or install a newer CUDA Toolkit).
@@ -42,7 +42,6 @@ There are several #define macros to be aware of, which control the behavior of t
 * ENABLE_DEPTH_OF_FIELD - modelviewer.cpp
 * ENABLE_FOVEATED - modelviewer.cpp
 * GAZE_CURSOR_MODE - modelviewer.cpp, controls how the foveated gaze point is set
-* MODEL_CONVERT - modelviewer.cpp, used when converting FBX models to .BIN (requires some additional code changes, see "scenePath" and "savePath" variables)
 * RT_WIDTH and RT_HEIGHT - modelviewer.cpp, sets the render target size in pixels and window client rect size
 * MODEL_IMPORT_ENABLE_FBX - model_import.h, enables FBX model loading (requires FBX SDK)
 * MAX_TRI_INDICES_TO_INTERSECT - magic_constants.h, this controls the size of the intermediate buffer which contains the list of triangles to intersect after BVH traversal. You may need to increase this to avoid a crash/assert in more complex scenes.
@@ -65,14 +64,6 @@ Enabling depth of field:
 Enabling wide field of view: (not tested in combination with other config options, yet)
 1. Set ENABLE_HACKY_WIDE_FOV to 1
 2. Set HACKY_WIDE_FOV_W and HACKY_WIDE_FOV_H to desired horizontal and vertical fields of view (in degrees)
-
-Converting an FBX scene to .BIN to improve startup time:
-1. Set MODEL_IMPORT_ENABLE_FBX to 1
-2. Set MODEL_CONVERT to 1
-3. Set the values for "scenePath" and "savePath"
-4. Run modelviewer
-5. Change MODEL_CONVERT back to 0
-6. Update the enum SimpleviewerScene to add your scene to the list, and add camera and scenePath settings to gOnInit()
 
 Benchmarking vs other raytracers:
 1. Set DISABLE_MOVEMENT to 1 to ensure consistent output
