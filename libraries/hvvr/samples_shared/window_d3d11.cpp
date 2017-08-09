@@ -255,5 +255,9 @@ void WindowD3D11::initRenderTargets() {
 
 void WindowD3D11::copyAndPresent(uint32_t syncInterval) {
     _context->CopyResource(_backBufferTex, _renderTargetTex);
+    present(syncInterval);
+}
+
+void WindowD3D11::present(uint32_t syncInterval) {
     _swapChain->Present(syncInterval, 0);
 }

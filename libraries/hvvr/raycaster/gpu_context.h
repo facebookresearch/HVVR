@@ -12,6 +12,7 @@
 #include "gpu_camera.h"
 #include "gpu_scene_state.h"
 
+#include <memory>
 #include <vector>
 
 namespace hvvr {
@@ -19,7 +20,7 @@ namespace hvvr {
 // TODO(anankervis): merge with Raycaster class
 class GPUContext {
 public:
-    std::vector<GPUCamera> cameras;
+    std::vector<std::unique_ptr<GPUCamera>> cameras;
     GPUSceneState sceneState;
     bool graphicsResourcesMapped;
 
@@ -38,8 +39,7 @@ public:
 
     void cleanup();
 
-    // Returns a reference to the camera with the given name, creating it if necessary
-    GPUCamera& getCreateCamera(const Camera* cameraPtr, bool& created);
+    GPUCamera* getCreateCamera(const Camera* cameraPtr, bool& created);
 
 protected:
 };

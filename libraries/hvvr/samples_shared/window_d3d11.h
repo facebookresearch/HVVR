@@ -57,6 +57,8 @@ public:
 
     // copy the intermediate render target to the backbuffer and present it
     void copyAndPresent(uint32_t syncInterval);
+    // just present the backbuffer - don't copy from the intermediate render target
+    void present(uint32_t syncInterval);
 
 protected:
     void* _windowHandle;

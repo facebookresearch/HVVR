@@ -79,7 +79,7 @@ Camera::Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuC
     }
 
     bool created = false;
-    _gpuCamera = &gpuContext.getCreateCamera(this, created);
+    _gpuCamera = gpuContext.getCreateCamera(this, created);
     assert(created == true);
 }
 

@@ -48,8 +48,7 @@ void GPUContext::cudaCleanup() {
     cutilSafeCall(cudaProfilerStop()); // Flush profiling data for nvprof
 }
 
-GPUContext::GPUContext() : graphicsResourcesMapped(false) {
-}
+GPUContext::GPUContext() : graphicsResourcesMapped(false) {}
 
 GPUContext::~GPUContext() {
     cleanup();
@@ -57,8 +56,8 @@ GPUContext::~GPUContext() {
 
 void GPUContext::getCudaGraphicsResources(std::vector<cudaGraphicsResource_t>& resources) {
     for (const auto& c : cameras) {
-        if (c.resultsResource) {
-            resources.push_back(c.resultsResource);
+        if (c->resultsResource) {
+            resources.push_back(c->resultsResource);
         }
     }
 }
@@ -74,10 +73,10 @@ void GPUContext::interopMapResources() {
 
         for (auto& c : cameras) {
             // Assumes if the result image is a linear vector, that we are directly writing into the result resource
-            if (c.resultImage.height() <= 1) {
-                if (c.resultsResource) {
-                    c.resultImage.updateFromLinearGraphicsResource(c.resultsResource, c.d_sampleRemap.size(),
-                                                                   outputModeToPixelFormat(c.outputMode));
+            if (c->resultImage.height() <= 1) {
+                if (c->resultsResource) {
+                    c->resultImage.updateFromLinearGraphicsResource(c->resultsResource, c->d_sampleRemap.size(),
+                                                                    outputModeToPixelFormat(c->outputMode));
                 }
             }
         }
@@ -101,35 +100,34 @@ void GPUContext::interopUnmapResources() {
 void GPUContext::cleanup() {
     interopUnmapResources();
     for (auto& c : cameras) {
-        if (c.resultsResource) {
-            cutilSafeCall(cudaGraphicsUnregisterResource(c.resultsResource));
+        if (c->resultsResource) {
+            cutilSafeCall(cudaGraphicsUnregisterResource(c->resultsResource));
         }
-        c.resultImage.reset();
-        c.d_sampleResults = GPUBuffer<uint32_t>();
+        c->resultImage.reset();
+        c->d_sampleResults = GPUBuffer<uint32_t>();
 
-        safeCudaEventDestroy(c.transferTileToCPUEvent);
-        safeCudaStreamDestroy(c.stream);
-        safeCudaFreeHost(c.tileFrustaPinned);
-        safeCudaFreeHost(c.cullBlockFrustaPinned);
-        safeCudaFreeHost(c.foveatedWorldSpaceTileFrustaPinned);
-        safeCudaFreeHost(c.foveatedWorldSpaceBlockFrustaPinned);
+        safeCudaEventDestroy(c->transferTileToCPUEvent);
+        safeCudaStreamDestroy(c->stream);
+        safeCudaFreeHost(c->tileFrustaPinned);
+        safeCudaFreeHost(c->cullBlockFrustaPinned);
+        safeCudaFreeHost(c->foveatedWorldSpaceTileFrustaPinned);
+        safeCudaFreeHost(c->foveatedWorldSpaceBlockFrustaPinned);
     }
     cameras.clear();
 }
 
-GPUCamera& GPUContext::getCreateCamera(const Camera* cameraPtr, bool& created) {
+GPUCamera* GPUContext::getCreateCamera(const Camera* cameraPtr, bool& created) {
     created = false;
     for (size_t i = 0; i < cameras.size(); ++i) {
-        if (cameras[i].cameraPtr == cameraPtr) {
-            return cameras[i];
+        if (cameras[i]->cameraPtr == cameraPtr) {
+            return cameras[i].get();
         }
     }
 
-    GPUCamera camera(cameraPtr);
-    cameras.emplace_back(camera);
+    cameras.emplace_back(std::make_unique<GPUCamera>(cameraPtr));
 
     created = true;
-    return cameras[cameras.size() - 1];
+    return (cameras.end() - 1)->get();
 }
 
 } // namespace hvvr
