@@ -45,7 +45,7 @@ enum ModelviewerScene {
     scene_bunny,
     scene_conference,
     scene_sponza,
-
+    scene_bistro_interior,
     SceneCount
 };
 // which scene to load?
@@ -185,6 +185,14 @@ void gOnInit() {
             gCameraPitch = -0.200078f;
             scenePath = sceneBasePath + "sponza.bin";
             sceneScale = .01f;
+            break;
+
+        case scene_bistro_interior:
+            // Amazon Bistro
+            gCameraPos = hvvr::vector3(2.0f, 2.0f, -0.5f);
+            gCameraYaw = -3.14159f * .5f;
+            gCameraPitch = 3.14159f * -.05f;
+            scenePath = sceneBasePath + "bistro.bin";
             break;
 
         default:
