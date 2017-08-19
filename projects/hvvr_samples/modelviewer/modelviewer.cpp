@@ -35,7 +35,7 @@
 #define ENABLE_DEPTH_OF_FIELD 0
 
 // you might also want to enable JITTER_SAMPLES in kernel_constants.h
-#define ENABLE_FOVEATED 0
+#define ENABLE_FOVEATED 1
 // for foveated
 #define GAZE_CURSOR_MODE_NONE 0 // eye direction is locked forward
 #define GAZE_CURSOR_MODE_MOUSE 1 // eye direction is set by clicking the mouse on the window
@@ -49,7 +49,7 @@ enum ModelviewerScene {
     SceneCount
 };
 // which scene to load?
-static ModelviewerScene gSceneSelect = scene_sponza;
+static ModelviewerScene gSceneSelect = scene_bistro_interior;
 
 #define RT_WIDTH 2160
 #define RT_HEIGHT 1200

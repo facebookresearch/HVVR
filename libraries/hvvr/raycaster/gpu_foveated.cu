@@ -190,37 +190,64 @@ CUDA_DEVICE vector2 angularEyeCoordToPolarTextureCoord(float theta,
     return {x, y};
 }
 
-CUDA_DEVICE void computeMoments3x3Window(
-    cudaTextureObject_t tex, vector2 coord, vector2 invDim, vector4& m_1, vector4& m_2) {
-    float offsets[3] = {-1.0f, 0.0f, 1.0f};
+template <int windowRadius>
+CUDA_DEVICE void computeMomentsInWindow(
+    Texture2D tex, vector2 coord, vector4& m_1, vector4& m_2) {
     m_1 = vector4(0.0f);
     m_2 = vector4(0.0f);
-    for (int x = 0; x < 3; ++x) {
-        for (int y = 0; y < 3; ++y) {
-            vector4 c(tex2D<float4>(tex, coord.x + (offsets[x] * invDim.x), coord.y + (offsets[y] * invDim.y)));
+    vector2 invDim = vector2(1.0f / tex.width, 1.0f / tex.height);
+    for (int x = -windowRadius; x <= windowRadius; ++x) {
+        for (int y = -windowRadius; y <= windowRadius; ++y) {
+            vector4 c(tex2D<float4>(tex.d_texObject, coord.x + ((float)x * invDim.x), coord.y + ((float)y * invDim.y)));
             m_1 += c;
             m_2 += c * c;
         }
     }
-    float weight = 1.0f / 9.0f;
+	const int windowSize = windowRadius * 2 + 1;
+    float weight = 1.0f / (float)(windowSize*windowSize);
     m_1 *= weight;
     m_2 *= weight;
 }
+
+
+template <int windowRadius>
+CUDA_DEVICE void computeMinMaxInWindow(
+	Texture2D tex, vector2 coord, vector4& minV, vector4& maxV) {
+
+	vector2 invDim = vector2(1.0f / tex.width, 1.0f / tex.height);
+	minV = vector4(tex2D<float4>(tex.d_texObject, coord.x + ((float)0 * invDim.x), coord.y + ((float)0 * invDim.y)));
+	maxV = vector4(0.0f);
+
+	for (int x = -windowRadius; x <= windowRadius; ++x) {
+		for (int y = -windowRadius; y <= windowRadius; ++y) {
+			vector4 c(tex2D<float4>(tex.d_texObject, coord.x + ((float)x * invDim.x), coord.y + ((float)y * invDim.y)));
+			minV = min(c, minV);
+			maxV = max(c, maxV);
+		}
+	}
+}
+
 
 CUDA_DEVICE vector4 sqrtf(vector4 v) {
     return vector4(v.x, v.y, v.z, v.w);
 }
 
 CUDA_DEVICE vector4 clampToNeighborhood(
-    vector4 oldValue, cudaTextureObject_t tex, vector2 coord, vector2 invDim, TemporalFilterSettings settings) {
+    vector4 oldValue, Texture2D tex, vector2 coord, TemporalFilterSettings settings) {
     vector4 m_1, m_2;
-    computeMoments3x3Window(tex, coord, invDim, m_1, m_2);
+	computeMomentsInWindow<4>(tex, coord, m_1, m_2);
     vector4 stdDev = sqrtf(m_2 - (m_1 * m_1));
     // Arbitrary
     float scaleFactor = settings.stddevMultiplier;
     vector4 minC = m_1 - (stdDev * scaleFactor);
     vector4 maxC = m_1 + (stdDev * scaleFactor);
     return clamp(oldValue, minC, maxC);
+}
+
+CUDA_DEVICE vector4 clampToExactNeighborhood(vector4 oldValue, Texture2D tex, vector2 coord, TemporalFilterSettings settings) {
+	vector4 minC, maxC;
+	computeMinMaxInWindow<1>(tex, coord, minC, maxC);
+	return clamp(oldValue, minC, maxC);
 }
 
 template <PixelFormat PixelFormat>
@@ -265,10 +292,9 @@ CUDA_KERNEL void FoveatedPolarToScreenSpaceKernel(Texture2D polarImage,
                 oldValue = vector4(tex2D<float4>(previousImage.d_texObject, oldTexCoord.x, oldTexCoord.y));
             }
             // TODO: could compute the moments in a prepass
-            vector2 invDim = vector2(1.0f / polarImage.width, 1.0f / polarImage.height);
-            vector4 clampedOldValue = clampToNeighborhood(oldValue, polarImage.d_texObject, coord, invDim, settings);
-            surfaceResult = alpha * newValue + (1.0f - alpha) * clampedOldValue;
-            result = surfaceResult;
+			vector4 clampedOldValue = clampToExactNeighborhood(oldValue, polarImage, coord, settings);//clampToNeighborhood(oldValue, polarImage, coord, settings);
+			surfaceResult = alpha * newValue + (1.0f - alpha) * clampedOldValue;
+			result = surfaceResult;
         }
 
         // DEBUG CODE:
@@ -326,7 +352,7 @@ CUDA_KERNEL void FoveatedTemporalFilterKernel(Texture2D rawImage,
             vector4 oldValue(tex2D<float4>(previousImage.d_texObject, oldTexCoord.x, oldTexCoord.y));
 
             // TODO: could compute the moments in a prepass
-            vector4 clampedOldValue = clampToNeighborhood(oldValue, rawImage.d_texObject, coord, invDim, settings);
+            vector4 clampedOldValue = clampToNeighborhood(oldValue, rawImage, coord, settings);
             result = alpha * newValue + (1.0f - alpha) * clampedOldValue;
         }
 

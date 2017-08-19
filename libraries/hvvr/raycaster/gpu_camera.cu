@@ -196,7 +196,7 @@ void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
     resultTexture =
         createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
 
-    contrastEnhancementSettings.enable = true;
+    contrastEnhancementSettings.enable = false;
     contrastEnhancementSettings.f_e = 0.2f;
     contrastEnhancementBuffers.horizontallyFiltered =
         createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
@@ -248,7 +248,7 @@ void GPUCamera::registerPolarFoveatedSamples(const std::vector<vector2ui>& polar
     previousPolarFoveatedImage = createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
                                                     textureFormat, cudaAddressModeWrap, cudaAddressModeClamp);
     rawPolarFoveatedImage = createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
-                                               textureFormat, cudaAddressModeWrap, cudaAddressModeClamp, false);
+                                               textureFormat, cudaAddressModeWrap, cudaAddressModeClamp, true);
     polarFoveatedDepthImage =
         createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
                            TextureFormat::r32_float, cudaAddressModeWrap, cudaAddressModeClamp, false);

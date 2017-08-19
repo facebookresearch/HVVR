@@ -37,7 +37,7 @@ struct GPURayPacketFrustum {
 
 struct TemporalFilterSettings {
     // 1 entirely use current sample
-    float alpha = 1.f;
+    float alpha = 0.1f;
     float stddevMultiplier = 4.0f;
     bool inPolarSpace = false;
 };
@@ -82,7 +82,7 @@ struct ContrastEnhancementBuffers {
 };
 
 struct ContrastEnhancementSettings {
-    bool enable;
+    bool enable = false;
     float f_e;
 };
 

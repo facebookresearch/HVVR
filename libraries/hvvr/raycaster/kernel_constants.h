@@ -14,9 +14,9 @@
 #define MSAA_SHADE 0
 #define SSAA_SHADE 1
 #define SUPERSHADING_MODE MSAA_SHADE
-#define JITTER_SAMPLES 0
+#define JITTER_SAMPLES 1
 // TODO(anankervis): GPU foveated path doesn't pass along correct tile culling frusta to intersect (yet)
-#define FOVEATED_TRIANGLE_FRUSTA_TEST_DISABLE 0
+#define FOVEATED_TRIANGLE_FRUSTA_TEST_DISABLE 1
 
 #define DOF_LENS_POS_LOOKUP_TABLE_TILES 4
 
