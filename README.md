@@ -68,7 +68,7 @@ Enabling wide field of view: (not tested in combination with other config option
 Benchmarking vs other raytracers:
 1. Set DISABLE_MOVEMENT to 1 to ensure consistent output
 2. Enable export of the scene and rays in libraries/hvvr/raycaster/render.cpp
-3. Import the scene and rays to https://github.com/Mx7f/RaytraceBenchmarking
+3. Import the scene and rays to https://github.com/anankervis/RaytraceBenchmarking
 
 ## Join the HVVR community
 See the CONTRIBUTING file for how to help out.
