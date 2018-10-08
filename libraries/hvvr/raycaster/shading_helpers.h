@@ -199,6 +199,14 @@ CHDI uint32_t ToColor4Unorm8SRgb(vector4 color) {
     uint32_t a = uint32_t(color.w * 255.0f);
     return (r) | (g << 8) | (b << 16) | (a << 24);
 }
+CHDI uint64_t ToColor4Unorm16(vector4 color) {
+	const float C = 65535.0f; // 2^16-1
+	uint64_t r = uint64_t(color.x * C);
+	uint64_t g = uint64_t(color.y * C);
+	uint64_t b = uint64_t(color.z * C);
+	uint64_t a = uint64_t(color.w * C);
+	return (r) | (g << 16) | (b << 32) | (a << 48);
+}
 
 CHDI vector4 FromColor4Unorm8(uint32_t c) {
     float r = (c & 0xFF) / 255.0f;

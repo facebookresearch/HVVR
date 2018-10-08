@@ -9,7 +9,7 @@
 
 #include "samples.h"
 #include "constants_math.h"
-
+#include "foveated.h"
 #include <assert.h>
 #include <cmath>
 #include <functional>
@@ -42,52 +42,41 @@ DynamicArray<Sample> getGridSamples(size_t width, size_t height) {
     return samples;
 }
 
-DynamicArray<DirectionSample> getEyeSpacePolarFoveatedSamples(std::vector<float>& ringEccentricities,
-                                                                    size_t& samplesPerRing,
-                                                                    float maxEyeTrackingUncertaintyDegrees,
-                                                                    float minMAR,
-                                                                    float maxMAR,
-                                                                    float maxFOVDegrees,
-                                                                    float marSlope,
-                                                                    float fovealMARDegrees,
-                                                                    float zenithJitterStrength,
-                                                                    float ringJitterStrength) {
-    assert(zenithJitterStrength <= 1.0f);
-    assert(ringJitterStrength <= 1.0f);
+DynamicArray<DirectionalBeam> getEyeSpacePolarFoveatedSamples(size_t& samplesPerRing,
+                                                              EccentricityMap& emap,
+                                                              float maxEyeTrackingUncertaintyDegrees,
+                                                              float maxFOVDegrees,
+                                                              float marSlope,
+                                                              float fovealMARDegrees) {
     const float m = marSlope;
     const float w_0 = fovealMARDegrees;
+    const float switchPoint1 = maxEyeTrackingUncertaintyDegrees / w_0;
+    const float S = maxEyeTrackingUncertaintyDegrees;
+    emap = EccentricityMap(marSlope, fovealMARDegrees, maxEyeTrackingUncertaintyDegrees);
 
     samplesPerRing = 0;
-    int ringCount = 0;
+	size_t ringCount = 0;
     size_t irregularGridSampleCount = 0;
     { // Calculate number of samples so we can allocate before generation
-        // w = m e + w_0
-        // e = (w - w_0 / m)
-        float e = (minMAR - w_0) / m;
-        float w = w_0;
-        while (e - w <= maxFOVDegrees) {
+        float E = 0.0f;
+        while (E <= maxFOVDegrees * RadiansPerDegree) {
             // Angular distance (in degrees) between samples on this annulus
-            w = std::min(maxMAR, m * std::max(e - maxEyeTrackingUncertaintyDegrees, 0.0f) + w_0);
-            float ringRadius = sinf(e * RadiansPerDegree);
+            float w = emap.apply(ringCount + 1.0f) - E;
+            float ringRadius = sinf(E);
             float angularDistanceAroundRing = 2.0f * Pi * ringRadius;
-            float angularDistanceAroundRingDegrees = angularDistanceAroundRing / RadiansPerDegree;
-            size_t samplesOnAnnulus = (size_t)(std::ceil(angularDistanceAroundRingDegrees / w));
-            printf("New samplesOnAnnulus: %zu = ceil(%f/%f)\n", samplesOnAnnulus, angularDistanceAroundRingDegrees, w);
+            size_t samplesOnAnnulus = (size_t)(std::ceil(angularDistanceAroundRing / w));
+            printf("New samplesOnAnnulus: %zu = ceil(%f/%f)\n", samplesOnAnnulus, angularDistanceAroundRing, w);
             samplesPerRing = std::max(samplesPerRing, samplesOnAnnulus);
 
             irregularGridSampleCount += samplesOnAnnulus;
-            e += w;
             ++ringCount;
+            E = emap.apply((float)ringCount);
         }
     }
-    printf("(%zu*%d=%d)/%d %f times the minimal sample count\n", samplesPerRing, ringCount,
+    printf("(%zu*%zu=%d)/%d %f times the minimal sample count\n", samplesPerRing, ringCount,
            (int)(samplesPerRing * ringCount), (int)irregularGridSampleCount,
            (samplesPerRing * ringCount) / (float)irregularGridSampleCount);
-
-    int index = 0;
-    DynamicArray<DirectionSample> samples(ringCount * samplesPerRing);
-    float e = (minMAR - w_0) / m;
-    float w = w_0;
+    DynamicArray<DirectionalBeam> samples(ringCount * samplesPerRing);
     /**
     A note on differentials:
     The zenith differential is found by taking the nearest point on the next concentric ring outwards, and
@@ -118,28 +107,19 @@ DynamicArray<DirectionSample> getEyeSpacePolarFoveatedSamples(std::vector<float>
     and then scaling it to the distance along the ring to the next sample
     */
     // Generate concentric circles of samples with spacing equal or less than MAR of eye at the eccentricity
-
-    std::uniform_real_distribution<float> uniformRandomDist(0.0f, 1.0f);
-    std::mt19937 generator;
-    auto rand = std::bind(uniformRandomDist, std::ref(generator));
-
-    while (e - w <= maxFOVDegrees) {
+    float E = 0.0f;
+    for (size_t r = 0; r < ringCount; ++r) {
         // Angular distance (in degrees) between samples on this annulus
-        w = std::min(maxMAR, m * std::max(e - maxEyeTrackingUncertaintyDegrees, 0.0f) + w_0);
-        float ringRadius = sinf(e * RadiansPerDegree);
+        float E_next = emap.apply(r + 1.0f);
+        float ringRadius = sinf(E);
         float angularDistanceAroundRing = 2.0f * Pi * ringRadius;
 
-        ringEccentricities.push_back(e * RadiansPerDegree);
-        float ringRotation = (rand() - 0.5f) * ringJitterStrength;
-        for (int i = 0; i < samplesPerRing; ++i) {
-            float zenithJitter = w * (rand() - 0.5f) * zenithJitterStrength * 0.5f;
-            vector3 baseVector = normalize(
-                quaternion::fromAxisAngle(vector3(0, 1, 0), (e + zenithJitter) * RadiansPerDegree) * vector3(0, 0, -1));
-            vector3 zenithDiffBaseVector =
-                normalize(quaternion::fromAxisAngle(vector3(0, 1, 0), (e + w + zenithJitter) * RadiansPerDegree) *
-                          vector3(0, 0, -1));
+        vector3 baseVector = normalize(quaternion::fromAxisAngle(vector3(0, 1, 0), E) * vector3(0, 0, -1));
+        vector3 zenithDiffBaseVector =
+            normalize(quaternion::fromAxisAngle(vector3(0, 1, 0), E_next) * vector3(0, 0, -1));
 
-            float rotationRadians = (i + ringRotation + 0.5f) / float(samplesPerRing) * 2.0f * Pi;
+        for (size_t i = 0; i < samplesPerRing; ++i) {
+            float rotationRadians = (i + 0.5f) / float(samplesPerRing) * 2.0f * Pi;
             vector3 p = normalize(quaternion::fromAxisAngle(vector3(0, 0, -1), rotationRadians) * baseVector);
             vector3 zenithDiffDirection =
                 normalize(quaternion::fromAxisAngle(vector3(0, 0, -1), rotationRadians) * zenithDiffBaseVector);
@@ -150,15 +130,62 @@ DynamicArray<DirectionSample> getEyeSpacePolarFoveatedSamples(std::vector<float>
             vector3 zenithDiff = zenithDiffDirectionOnTangentPlane - p;
             vector3 azimuthalDiffUnit = cross(p, normalize(zenithDiff));
             vector3 azimuthalDiff = azimuthalDiffUnit * angularDistanceAroundRing / (float)samplesPerRing;
-            samples[index].direction = p;
-            samples[index].zenithDifferential = zenithDiff;
-            samples[index].azimuthalDifferential = azimuthalDiff;
-            ++index;
+            size_t idx = samplesPerRing * r + i;
+            samples[idx].centerRay = p;
+            samples[idx].du = zenithDiff;
+            samples[idx].dv = azimuthalDiff;
         }
 
-        e += w;
+        E = E_next;
     }
+
     return samples;
 }
+
+UnpackedSample unpackSample(Sample s) {
+    UnpackedSample sample;
+    // sqrt(2)/2, currently a hack so that the ellipses blobs of diagonally adjacent pixels on a uniform grid are
+    // tangent
+#define EXTENT_MODIFIER 0.70710678118f
+    sample.center = s.position;
+    sample.minorAxis.x = s.extents.minorAxis.x * EXTENT_MODIFIER;
+    sample.minorAxis.y = s.extents.minorAxis.y * EXTENT_MODIFIER;
+
+    // 90 degree Rotation, and rescale
+    float rescale = s.extents.majorAxisLength * EXTENT_MODIFIER / length(s.extents.minorAxis);
+    sample.majorAxis.x = -sample.minorAxis.y * rescale;
+    sample.majorAxis.y = sample.minorAxis.x * rescale;
+    return sample;
+#undef EXTENT_MODIFIER
+}
+
+void saveSamples(const std::vector<hvvr::Sample>& samples, const std::string& filename) {
+    auto file = fopen(filename.c_str(), "wb");
+    if (!file) {
+        hvvr::fail("Unable to open output sample file %s", filename.c_str());
+    }
+    SampleFileHeader header;
+    header.sampleCount = uint32_t(samples.size());
+    fwrite(&header, sizeof(SampleFileHeader), 1, file);
+    fwrite(&samples[0], sizeof(hvvr::Sample), header.sampleCount, file);
+    fclose(file);
+}
+
+void loadSamples(hvvr::DynamicArray<hvvr::Sample>& samples, const std::string& filename) {
+    auto file = fopen(filename.c_str(), "rb");
+    if (!file) {
+        hvvr::fail("Unable to find sample file %s\nMake sure to generate them using GenerateSamplesFromDistortion "
+                   "then copy them to this project's folder",
+                   filename.c_str());
+    }
+    SampleFileHeader header;
+    fread(&header, sizeof(SampleFileHeader), 1, file);
+    assert(header.magic == SampleFileHeader().magic);
+    assert(header.version == SampleFileHeader().version);
+    samples = hvvr::DynamicArray<hvvr::Sample>(header.sampleCount);
+    fread(samples.data(), sizeof(hvvr::Sample), samples.size(), file);
+    fclose(file);
+}
+
 
 } // namespace hvvr

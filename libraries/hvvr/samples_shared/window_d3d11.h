@@ -10,7 +10,7 @@
  */
 
 #include <stdint.h>
-
+#include <functional>
 struct IDXGISwapChain;
 struct ID3D11Device;
 struct ID3D11DeviceContext;
@@ -19,15 +19,23 @@ struct ID3D11RenderTargetView;
 
 class WindowD3D11 {
 public:
-    typedef void(*ResizeCallback)();
-    typedef void(*RawMouseInputCallback)(int dx, int dy);
+    typedef std::function<void(int,int)>  ResizeCallback;
+	typedef std::function<void(int, int)> RawMouseInputCallback;
 
     WindowD3D11(const char* name,
                 uint32_t width,
                 uint32_t height,
-                ResizeCallback resizeCallback,
-                RawMouseInputCallback rawMouseInputCallback);
+                ResizeCallback resizeCallback = nullptr,
+                RawMouseInputCallback rawMouseInputCallback = nullptr);
     ~WindowD3D11();
+
+	void setResizeCallback(ResizeCallback cb) {
+		_resizeCallback = cb;
+	}
+
+	void setRawMouseInputCallback(RawMouseInputCallback cb) {
+		_rawMouseInputCallback = cb;
+	}
 
     void* getWindowHandle() const {
         return _windowHandle;
@@ -50,6 +58,9 @@ public:
     }
     ID3D11Texture2D* getBackBufferTex() const {
         return _backBufferTex;
+    }
+    ID3D11RenderTargetView* getBackBufferRTV() const {
+        return _backBufferRTV;
     }
     ID3D11Texture2D* getRenderTargetTex() const {
         return _renderTargetTex;

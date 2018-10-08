@@ -9,18 +9,6 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-// TODO: Remove all dependencies on DX
-#ifdef _WIN32
-#define DX_SUPPORTED
-#endif
-
-// TODO(anankervis): move this elsewhere - the raycaster core shouldn't care what the output mode is
-#define OUTPUT_MODE_NONE 0
-#define OUTPUT_MODE_3D_API 1
-// not yet implemented
-#define OUTPUT_MODE_PNG 2
-#define OUTPUT_MODE OUTPUT_MODE_3D_API
-
 namespace hvvr {
 
 // Rays per tile

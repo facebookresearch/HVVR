@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Development|x64">
@@ -15,6 +15,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="3rdparty\lodepng.h" />
     <ClInclude Include="array_view.h" />
     <ClInclude Include="avx.h" />
     <ClInclude Include="bvh.h" />
@@ -30,6 +31,7 @@
     <ClInclude Include="vector_math.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="3rdparty\lodepng.cpp" />
     <ClCompile Include="bvh.cpp" />
     <ClCompile Include="debug.cpp" />
     <ClCompile Include="timer.cpp" />

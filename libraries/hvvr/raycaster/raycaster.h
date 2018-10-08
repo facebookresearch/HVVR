@@ -9,9 +9,9 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "raycaster_spec.h"
 #include "dynamic_array.h"
 #include "graphics_types.h"
+#include "raycaster_spec.h"
 
 #include <memory>
 #include <string>
@@ -19,8 +19,9 @@
 
 struct PrecomputedTriangleShade;
 struct BVHNode;
-struct BlockInfo;
+struct RayHierarchy;
 struct Camera_StreamedData;
+struct RayPacketFrustum3D;
 
 namespace hvvr {
 
@@ -63,6 +64,8 @@ public:
     //// rendering
     void render(double elapsedTime);
 
+    void reinit(RayCasterGPUMode mode);
+
 protected:
     Raycaster(const Raycaster&) = delete;
     Raycaster(Raycaster&&) = delete;
@@ -94,12 +97,26 @@ protected:
     void uploadScene();
     void cleanupScene();
 
+    void setupAllRenderTargets();
+    void blitAllRenderTargets();
+
+    void interopMapResources();
+    void interopUnmapResources();
+
+
     //// rendering
+    void renderCameraGPUIntersectAndReconstructDeferredMSAAResolve(std::unique_ptr<hvvr::Camera>& camera);
     void renderGPUIntersectAndReconstructDeferredMSAAResolve();
     void renderFoveatedPolarSpaceCudaReconstruct();
+    void renderCamera(std::unique_ptr<hvvr::Camera>& camera);
 
     // traverse BVH and generate lists of triangles to intersect on the GPU
-    void buildTileTriangleLists(const BlockInfo& blockInfo, Camera_StreamedData* streamed);
+    void buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed);
+    void transformHierarchyCameraToWorld(std::unique_ptr<hvvr::Camera>& camera,
+                                         const RayPacketFrustum3D* tilesSrc,
+                                         const RayPacketFrustum3D* blocksSrc,
+                                         uint32_t blockCount,
+                                         Camera_StreamedData* streamed);
 };
 
 } // namespace hvvr

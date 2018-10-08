@@ -7,7 +7,6 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "traversal.h"
 #include "constants_math.h"
 #include "cuda_decl.h"
 #include "foveated.h"
@@ -18,40 +17,36 @@
 #include "kernel_constants.h"
 #include "memory_helpers.h"
 #include "sort.h"
+#include "traversal.h"
 #include "vector_math.h"
 #include "warp_ops.h"
 
 
 namespace hvvr {
 
-// TODO(mmara): Handle beyond single point of origin rays
-void ComputeEyeSpaceFrusta(const GPUBuffer<PrecomputedDirectionSample>& dirSamples,
+void ComputeEyeSpaceFrusta(const GPUBuffer<DirectionalBeam>& dirSamples,
                            GPUBuffer<SimpleRayFrustum>& tileFrusta,
                            GPUBuffer<SimpleRayFrustum>& blockFrusta) {
-    DynamicArray<PrecomputedDirectionSample> samples = makeDynamicArray(dirSamples);
+    DynamicArray<DirectionalBeam> samples = makeDynamicArray(dirSamples);
     DynamicArray<SimpleRayFrustum> tFrusta = makeDynamicArray(tileFrusta);
     DynamicArray<SimpleRayFrustum> bFrusta = makeDynamicArray(blockFrusta);
 
+    const bool checkFrustaAccuracy = false;
+    const bool printStats = false;
+
     auto generateFrusta = [](DynamicArray<SimpleRayFrustum>& frusta, unsigned int frustaSampleCount,
-                             const DynamicArray<PrecomputedDirectionSample>& samples, float slopFactor,
-                             int numOrientationsToTry) {
-        auto toDir = [](const matrix3x3& rot, float u, float v) {
-            return rot * normalize(vector3(u, v, 1.0f));
-        };
+                             const DynamicArray<DirectionalBeam>& samples, float slopFactor, int numOrientationsToTry) {
+        auto toDir = [](const matrix3x3& rot, float u, float v) { return rot * normalize(vector3(u, v, 1.0f)); };
         for (int i = 0; i < frusta.size(); ++i) {
             int sBegin = i * frustaSampleCount;
             int sEnd = min((int)((i + 1) * frustaSampleCount), (int)samples.size());
             vector3 dominantDirection(0.0f);
             for (int s = sBegin; s < sEnd; ++s) {
-                // printf("samples[%d].center : %f, %f, %f\n", s, samples[s].center.x, samples[s].center.y,
-                // samples[s].center.z);
-                dominantDirection += samples[s].center;
+                dominantDirection += samples[s].centerRay;
             }
             dominantDirection = normalize(dominantDirection);
-            // printf("Dominant Direction %d: %f, %f, %f\n", i, dominantDirection.x, dominantDirection.y,
-            // dominantDirection.z);
 
-            // Try several different orientations for the plane, pick the one that 
+            // Try several different orientations for the plane, pick the one that
             // gives the smallest bounding box in uv space
             matrix3x3 rot(matrix3x3::rotationFromZAxis(dominantDirection));
             float bestUVArea = INFINITY;
@@ -59,22 +54,23 @@ void ComputeEyeSpaceFrusta(const GPUBuffer<PrecomputedDirectionSample>& dirSampl
             vector2 bestMinUV = vector2(INFINITY);
             vector2 bestMaxUV = vector2(-INFINITY);
             for (int o = 0; o < numOrientationsToTry; ++o) {
-                matrix3x3 currRot = matrix3x3::axisAngle(vector3(0, 0, 1), (Pi * o / float(numOrientationsToTry))) * rot;
+                const float range = (Pi / 2.0f) * 0.8f;
+                matrix3x3 currRot =
+                    matrix3x3::axisAngle(vector3(0, 0, 1), (range * o / float(numOrientationsToTry)) - (range / 2.0f)) *
+                    rot;
                 matrix3x3 invCurrRot = invert(currRot);
                 vector2 minUV = vector2(INFINITY);
                 vector2 maxUV = vector2(-INFINITY);
                 for (int s = sBegin; s < sEnd; ++s) {
-                    vector3 v = invCurrRot * samples[s].center;
+                    vector3 v = invCurrRot * samples[s].centerRay;
                     vector2 uv = vector2(v.x / v.z, v.y / v.z);
-
                     // TODO: check math here
-                    v = invCurrRot * samples[s].d1;
+                    v = invCurrRot * (samples[s].du + samples[s].centerRay);
                     float uvRadius = length(uv - vector2(v.x / v.z, v.y / v.z));
-                    v = invCurrRot * samples[s].d2;
+                    v = invCurrRot * (samples[s].dv + samples[s].centerRay);
                     uvRadius = max(uvRadius, length(uv - vector2(v.x / v.z, v.y / v.z)));
                     // slop; TODO: is this necessary, or can we do something more principled?
                     uvRadius *= slopFactor;
-
                     minUV = min(minUV, uv - uvRadius);
                     maxUV = max(maxUV, uv + uvRadius);
                 }
@@ -96,147 +92,44 @@ void ComputeEyeSpaceFrusta(const GPUBuffer<PrecomputedDirectionSample>& dirSampl
             f.directions[2] = toDir(bestRot, bestMaxUV.x, bestMinUV.y);
             f.directions[3] = toDir(bestRot, bestMinUV.x, bestMinUV.y);
 
-#if 0
-            // Make sure all samples points are within the frustum...
-            RayPacketFrustum3D checker(f);
-            for (int s = sBegin; s < sEnd; ++s) {
-                vector4 v = toVec(samples[s].center);
-                if (!checker.testPoint(v)) {
-                    printf("TROUBLE!\n");
+            if (printStats) {
+                for (int o = 0; o < 4; ++o) {
+                    printf("f[%d].directions[%d]: %f, %f, %f\n", i, o, f.directions[o].x, f.directions[o].y,
+                           f.directions[o].z);
+                }
+                printf("f[%d].bestUVArea: %f\n", i, bestUVArea);
+                printf("Dominant Direction: %f %f %f\n", dominantDirection.x, dominantDirection.y, dominantDirection.z);
+            }
+            if (checkFrustaAccuracy) {
+                // Make sure all samples points are within the frustum...
+                RayPacketFrustum3D checker(f);
+                for (int s = sBegin; s < sEnd; ++s) {
+                    auto C = samples[s].centerRay;
+                    if (!checker.testPoint(C)) {
+                        printf("TROUBLE: f[%d]: s[%d]:%f %f %f \n", i, s, C.x, C.y, C.z);
+                    }
                 }
             }
-#endif
-
-            for (int o = 0; o < 4; ++o) {
-                printf("f[%d].directions[%d]: %f, %f, %f\n", i, o, f.directions[o].x, f.directions[o].y,
-                       f.directions[o].z);
-            }
-            printf("f[%d].bestUVArea: %f\n", i, bestUVArea);
 
             frusta[i] = f;
         }
     };
-    generateFrusta(tFrusta, TILE_SIZE, samples, 4.0f, 64);
-    generateFrusta(bFrusta, BLOCK_SIZE, samples, 4.0f, 64);
+    generateFrusta(tFrusta, TILE_SIZE, samples, 2.0f, 63);
+    generateFrusta(bFrusta, BLOCK_SIZE, samples, 2.0f, 63);
 
     tileFrusta = makeGPUBuffer(tFrusta);
     blockFrusta = makeGPUBuffer(bFrusta);
 }
 
-CUDA_KERNEL void CalculateSampleCullFrustaKernel(GPURayPacketFrustum* d_blockFrusta,
-                                                 GPURayPacketFrustum* d_tileFrusta,
-                                                 SampleInfo sampleInfo,
-                                                 const uint32_t sampleCount) {
-    uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    uint32_t tileIndex, blockIndex;
-    float minLocX = CUDA_INF;
-    float minLocY = CUDA_INF;
-    float negMaxLocX = CUDA_INF;
-    float negMaxLocY = CUDA_INF;
-    if (index < sampleCount) {
-        tileIndex = index / TILE_SIZE;
-        blockIndex = index / BLOCK_SIZE;
-        // TODO: see if we can cut down on work here
-        UnpackedSample s = GetFullSample(index, sampleInfo);
-        vector2 location = s.center;
-        float radius = sampleInfo.extents[index].majorAxisLength;
-        if (location.x != CUDA_INF) {
-            minLocX = location.x - radius;
-            minLocY = location.y - radius;
-            negMaxLocX = -(location.x + radius);
-            negMaxLocY = -(location.y + radius);
-        }
-    }
-    // Do warp reduction
-    auto minOp = [](float a, float b) -> float { return min(a, b); };
-    minLocX = warpReduce(minLocX, minOp);
-    minLocY = warpReduce(minLocY, minOp);
-    negMaxLocX = warpReduce(negMaxLocX, minOp);
-    negMaxLocY = warpReduce(negMaxLocY, minOp);
-    int lane = threadIdx.x % WARP_SIZE;
-    // All min values are in lane 0, go ahead and atomic min the results
-    if (lane == 0 && (index < sampleCount)) {
-        // No native float atomics, so we need to encode to handle our floats
-        atomicMin((uint32_t*)(&d_tileFrusta[tileIndex].xMin), FloatFlipF(minLocX));
-        atomicMin((uint32_t*)(&d_tileFrusta[tileIndex].yMin), FloatFlipF(minLocY));
-        atomicMin((uint32_t*)(&d_tileFrusta[tileIndex].xNegMax), FloatFlipF(negMaxLocX));
-        atomicMin((uint32_t*)(&d_tileFrusta[tileIndex].yNegMax), FloatFlipF(negMaxLocY));
 
-        atomicMin((uint32_t*)(&d_blockFrusta[blockIndex].xMin), FloatFlipF(minLocX));
-        atomicMin((uint32_t*)(&d_blockFrusta[blockIndex].yMin), FloatFlipF(minLocY));
-        atomicMin((uint32_t*)(&d_blockFrusta[blockIndex].xNegMax), FloatFlipF(negMaxLocX));
-        atomicMin((uint32_t*)(&d_blockFrusta[blockIndex].yNegMax), FloatFlipF(negMaxLocY));
+CUDA_HOST_DEVICE_INL bool planeCullsFrustum(const Plane plane, const SimpleRayFrustum& frustum) {
+    bool allout = true;
+    for (int i = 0; i < 4; ++i) {
+        allout = allout && dot(plane.normal, frustum.origins[i]) > plane.dist;
+        // Extend rays far-out
+        allout = allout && dot(plane.normal, frustum.origins[i] + frustum.directions[i] * 10000.0f) > plane.dist;
     }
-}
-CUDA_KERNEL void DecodeSampleCullFrustaKernel(GPURayPacketFrustum* d_blockFrusta,
-                                              uint32_t blockCount,
-                                              GPURayPacketFrustum* d_tileFrusta,
-                                              uint32_t tileCount) {
-    const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index < blockCount + tileCount) {
-        uint32_t* ptr;
-        if (index < blockCount) {
-            ptr = (uint32_t*)(&d_blockFrusta[index]);
-        } else {
-            ptr = (uint32_t*)(&d_tileFrusta[index - blockCount]);
-        }
-        for (int i = 0; i < 4; ++i) {
-            ptr[i] = IFloatFlip(ptr[i]);
-        }
-    }
-}
-
-CUDA_KERNEL void ResetCullFrustaKernel(GPURayPacketFrustum* d_blockFrusta,
-                                       uint32_t blockCount,
-                                       GPURayPacketFrustum* d_tileFrusta,
-                                       uint32_t tileCount) {
-    const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index < blockCount + tileCount) {
-        GPURayPacketFrustum* ptr;
-        if (index < blockCount) {
-            ptr = &d_blockFrusta[index];
-        } else {
-            ptr = &d_tileFrusta[index - blockCount];
-        }
-        // Set to -INFINITY, as its the FlipFloat encoding of +INFINITY
-        ptr[0].xMin = -CUDA_INF;
-        ptr[0].xNegMax = -CUDA_INF;
-        ptr[0].yMin = -CUDA_INF;
-        ptr[0].yNegMax = -CUDA_INF;
-    }
-}
-
-void ResetCullFrusta(GPURayPacketFrustum* d_blockFrusta,
-                     GPURayPacketFrustum* d_tileFrusta,
-                     const uint32_t tileCount,
-                     const uint32_t blockCount,
-                     cudaStream_t stream) {
-    {
-        size_t combinedBlockAndTileCount = tileCount + blockCount;
-        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
-        ResetCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, blockCount, d_tileFrusta, tileCount);
-    }
-}
-
-void CalculateSampleCullFrusta(GPURayPacketFrustum* d_blockFrusta,
-                               GPURayPacketFrustum* d_tileFrusta,
-                               SampleInfo sampleInfo,
-                               const uint32_t sampleCount,
-                               const uint32_t tileCount,
-                               const uint32_t blockCount,
-                               cudaStream_t stream) {
-    static_assert((TILE_SIZE % 32 == 0), "TILE_SIZE must be a multiple of 32, the CUDA warp size");
-    {
-        KernelDim dim = KernelDim(sampleCount, CUDA_GROUP_SIZE);
-        CalculateSampleCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, d_tileFrusta, sampleInfo,
-                                                                            sampleCount);
-    }
-    {
-        size_t combinedBlockAndTileCount = tileCount + blockCount;
-        KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
-        DecodeSampleCullFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(d_blockFrusta, blockCount, d_tileFrusta,
-                                                                         tileCount);
-    }
+    return allout;
 }
 
 CUDA_KERNEL void CalculateWorldSpaceFrustaKernel(SimpleRayFrustum* blockFrustaWS,
@@ -244,12 +137,12 @@ CUDA_KERNEL void CalculateWorldSpaceFrustaKernel(SimpleRayFrustum* blockFrustaWS
                                                  SimpleRayFrustum* blockFrustaES,
                                                  SimpleRayFrustum* tileFrustaES,
                                                  matrix4x4 eyeToWorldMatrix,
+                                                 FourPlanes cullPlanes,
                                                  uint32_t blockCount,
                                                  uint32_t tileCount) {
     const uint32_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index < blockCount + tileCount) {
-        SimpleRayFrustum* inPtr;
-        SimpleRayFrustum* outPtr;
+        SimpleRayFrustum *inPtr, *outPtr;
         if (index < blockCount) {
             inPtr = (&blockFrustaES[index]);
             outPtr = (&blockFrustaWS[index]);
@@ -257,19 +150,25 @@ CUDA_KERNEL void CalculateWorldSpaceFrustaKernel(SimpleRayFrustum* blockFrustaWS
             inPtr = (&tileFrustaES[index - blockCount]);
             outPtr = (&tileFrustaWS[index - blockCount]);
         }
+        bool culled = false;
+        SimpleRayFrustum f;
         for (int i = 0; i < 4; ++i) {
-            vector4 origin =
-                eyeToWorldMatrix * vector4((*inPtr).origins[i].x, (*inPtr).origins[i].y, (*inPtr).origins[i].z, 1.0f);
-            (*outPtr).origins[i].x = origin.x;
-            (*outPtr).origins[i].y = origin.y;
-            (*outPtr).origins[i].z = origin.z;
-            // TODO(mmara): use inverse transpose to handle non-uniform scale?
-            vector4 direction = eyeToWorldMatrix * vector4((*inPtr).directions[i].x, (*inPtr).directions[i].y,
-                                                           (*inPtr).directions[i].z, 0.0f);
-            (*outPtr).directions[i].x = direction.x;
-            (*outPtr).directions[i].y = direction.y;
-            (*outPtr).directions[i].z = direction.z;
+            f.origins[i] = vector3(eyeToWorldMatrix * vector4((*inPtr).origins[i], 1.0f));
+            // We do not handle non-uniform scaling (could use inverse transpose of eyeToWorld to do so)
+            f.directions[i] = normalize(vector3(eyeToWorldMatrix * vector4((*inPtr).directions[i], 0.0f)));
         }
+        for (int i = 0; i < 4; ++i) {
+            Plane p = cullPlanes.data[i];
+            culled = culled || planeCullsFrustum(p, f);
+        }
+        if (culled) {
+            for (int i = 0; i < 4; ++i) {
+                // Signal degenerate frustum
+                f.origins[i] = vector3(INFINITY, INFINITY, INFINITY);
+                f.directions[i] = vector3(0, 0, 0);
+            }
+        }
+        (*outPtr) = f;
     }
 }
 
@@ -278,6 +177,7 @@ void CalculateWorldSpaceFrusta(SimpleRayFrustum* blockFrustaWS,
                                SimpleRayFrustum* blockFrustaES,
                                SimpleRayFrustum* tileFrustaES,
                                matrix4x4 eyeToWorldMatrix,
+                               FourPlanes cullPlanes,
                                uint32_t blockCount,
                                uint32_t tileCount,
                                cudaStream_t stream) {
@@ -285,7 +185,7 @@ void CalculateWorldSpaceFrusta(SimpleRayFrustum* blockFrustaWS,
     size_t combinedBlockAndTileCount = tileCount + blockCount;
     KernelDim dim = KernelDim(combinedBlockAndTileCount, CUDA_GROUP_SIZE);
     CalculateWorldSpaceFrustaKernel<<<dim.grid, dim.block, 0, stream>>>(
-        blockFrustaWS, tileFrustaWS, blockFrustaES, tileFrustaES, eyeToWorldMatrix, blockCount, tileCount);
+        blockFrustaWS, tileFrustaWS, blockFrustaES, tileFrustaES, eyeToWorldMatrix, cullPlanes, blockCount, tileCount);
 }
 
 } // namespace hvvr

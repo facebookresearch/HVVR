@@ -13,9 +13,8 @@
 
 namespace hvvr {
 
-SampleInfo::SampleInfo(const GPUCamera& camera) {
-    centers = camera.d_sampleLocations;
-    extents = camera.d_sampleExtents;
+CameraBeams::CameraBeams(const GPUCamera& camera) {
+    directionalBeams = camera.d_directionalBeams;
     frameJitter = camera.frameJitter;
     lens = camera.lens;
 }

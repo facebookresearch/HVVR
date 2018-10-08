@@ -14,15 +14,14 @@
 #define MSAA_SHADE 0
 #define SSAA_SHADE 1
 #define SUPERSHADING_MODE MSAA_SHADE
+
 #define JITTER_SAMPLES 0
-// TODO(anankervis): GPU foveated path doesn't pass along correct tile culling frusta to intersect (yet)
-#define FOVEATED_TRIANGLE_FRUSTA_TEST_DISABLE 0
+
+// GPU foveated path doesn't pass along correct tile culling frusta to intersect (yet), so disable
+// If enabled, increases intersection perf on our test scenes ~4%
+#define USE_TILE_FRUSTA_TEST 1
 
 #define DOF_LENS_POS_LOOKUP_TABLE_TILES 4
-
-#define ENABLE_HACKY_WIDE_FOV 0
-#define HACKY_WIDE_FOV_W 210.0f
-#define HACKY_WIDE_FOV_H 130.0f
 
 #define SM_BARYCENTRIC 2
 #define SM_TRI_ID 3

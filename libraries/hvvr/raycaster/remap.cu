@@ -129,7 +129,7 @@ void GPUCamera::remap() {
     }
 }
 
-// TODO: switch to a gather approach to improve perf?
+// Switching to gather might improve performance, but this will likely never be a bottleneck
 CUDA_KERNEL void RemapPolarFoveatedKernel(uint32_t* src,
                                           float* tmaxSrc,
                                           vector2ui* remap,
@@ -147,14 +147,14 @@ CUDA_KERNEL void RemapPolarFoveatedKernel(uint32_t* src,
 }
 
 void GPUCamera::remapPolarFoveated() {
-    uint32_t rawSampleCount = rawPolarFoveatedImage.width * rawPolarFoveatedImage.height;
+    uint32_t rawSampleCount = polarTextures.raw.width * polarTextures.raw.height;
     KernelDim dim = KernelDim(rawSampleCount, CUDA_GROUP_SIZE);
 
     switch (outputModeToPixelFormat(outputMode)) {
         case PixelFormat::RGBA8_SRGB:
             RemapPolarFoveatedKernel<<<dim.grid, dim.block, 0, stream>>>(d_sampleResults.data(), d_tMaxBuffer,
-                                                                         d_polarRemapToPixel, rawPolarFoveatedImage,
-                                                                         polarFoveatedDepthImage, rawSampleCount);
+                                                                         d_polarRemapToPixel, polarTextures.raw,
+                                                                         polarTextures.depth, rawSampleCount);
             break;
         default:
             assert(false);

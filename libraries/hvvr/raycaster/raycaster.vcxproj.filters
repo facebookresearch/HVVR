@@ -19,9 +19,6 @@
     <ClInclude Include="frusta.h">
       <Filter>cuda\samples</Filter>
     </ClInclude>
-    <ClInclude Include="gpu_foveated.h">
-      <Filter>cuda\samples</Filter>
-    </ClInclude>
     <ClInclude Include="tile_data.h">
       <Filter>cuda\samples</Filter>
     </ClInclude>
@@ -57,9 +54,6 @@
     </ClInclude>
     <ClInclude Include="warp_ops.h">
       <Filter>cuda\util</Filter>
-    </ClInclude>
-    <ClInclude Include="gbuffer.h">
-      <Filter>cuda</Filter>
     </ClInclude>
     <ClInclude Include="gpu_camera.h">
       <Filter>cuda</Filter>

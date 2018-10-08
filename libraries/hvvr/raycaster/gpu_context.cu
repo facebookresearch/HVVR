@@ -15,28 +15,31 @@
 
 namespace hvvr {
 
-bool GPUContext::cudaInit() {
+bool GPUContext::cudaInit(bool forceNonTCC) {
     int deviceCount = 0;
     cutilSafeCall(cudaGetDeviceCount(&deviceCount));
 
     int device = 0;
-#if OUTPUT_MODE == OUTPUT_MODE_3D_API
-    cudaDeviceProp deviceProps = {};
 
-    // if we're on Windows, search for a non-TCC device
-    for (int n = 0; n < deviceCount; n++) {
-        cudaGetDeviceProperties(&deviceProps, n);
-        if (deviceProps.tccDriver == 0) {
-            device = n;
-            break;
+    if (forceNonTCC) {
+        cudaDeviceProp deviceProps = {};
+
+        // if we're on Windows, search for a non-TCC device
+        for (int n = 0; n < deviceCount; n++) {
+            cudaGetDeviceProperties(&deviceProps, n);
+            if (deviceProps.tccDriver == 0) {
+                device = n;
+                break;
+            }
         }
     }
-#endif
     cutilSafeCall(cudaSetDevice(device));
 
     uint32_t deviceFlags = 0;
     deviceFlags |= cudaDeviceMapHost;
-    if (cudaSuccess != cudaSetDeviceFlags(deviceFlags)) {
+    auto error = cudaSetDeviceFlags(deviceFlags);
+    if (cudaSuccess != error) {
+        fprintf(stderr, "error %d: cuda call failed with %s\n", error, cudaGetErrorString(error));
         assert(false);
         return false;
     }
@@ -108,8 +111,6 @@ void GPUContext::cleanup() {
 
         safeCudaEventDestroy(c->transferTileToCPUEvent);
         safeCudaStreamDestroy(c->stream);
-        safeCudaFreeHost(c->tileFrustaPinned);
-        safeCudaFreeHost(c->cullBlockFrustaPinned);
         safeCudaFreeHost(c->foveatedWorldSpaceTileFrustaPinned);
         safeCudaFreeHost(c->foveatedWorldSpaceBlockFrustaPinned);
     }

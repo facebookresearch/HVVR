@@ -24,7 +24,8 @@ public:
     GPUSceneState sceneState;
     bool graphicsResourcesMapped;
 
-    static bool cudaInit();
+    // If forceNonTcc is true, select a cuda device with a non-TCC driver.
+    static bool cudaInit(bool forceNonTcc);
     static void cudaCleanup();
 
     GPUContext();

@@ -10,8 +10,9 @@
  */
 
 #include "dynamic_array.h"
-#include "graphics_types.h"
 #include "foveated.h"
+#include "gpu_samples.h"
+#include "graphics_types.h"
 #include "sample_hierarchy.h"
 #include "samples.h"
 
@@ -23,36 +24,36 @@ namespace hvvr {
 class GPUCamera;
 class GPUContext;
 
+
 // preprocessed samples, ready for rendering
 struct SampleData {
+    SampleHierarchy2D samples2D;
+    Sample2Dto3DMappingSettings settings2DTo3D;
     SampleHierarchy samples;
     uint32_t splitColorSamples = 1;
-    uint32_t sampleCount;
 
     DynamicArray<int32_t> imageLocationToSampleIndex;
-    // Flat array of sample positions (in vector2 format) without fancy swizzling for CPU vectorization
-    DynamicArray<float> blockedSamplePositions;
-    DynamicArray<Sample::Extents> blockedSampleExtents;
 
     FloatRect sampleBounds = {{0.0f, 0.0f}, {0.0f, 0.0f}};
     uint32_t validSampleCount = 0;
-    ThinLens lens = {0.0f, 5.0f};
 
     SampleData(){};
     SampleData(const Sample* rawSamples,
                uint32_t rawSampleCount,
                uint32_t splitColorSamples,
-               const matrix3x3& sampleToCamera,
-               ThinLens lens,
+               Sample2Dto3DMappingSettings settings2DTo3D,
                uint32_t rtWidth,
                uint32_t rtHeight);
+    void generate3Dfrom2D(Sample2Dto3DMappingSettings settings);
 };
+
 
 // TODO(anankervis): merge with GPU version of this class
 class Camera {
     friend class Raycaster;
     // TODO(anankervis): remove
     friend void polarSpaceFoveatedSetup(Raycaster* raycaster);
+
 public:
     Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuContext);
     ~Camera();
@@ -84,27 +85,35 @@ public:
     void setRenderTarget(const ImageResourceDescriptor& newRenderTarget);
     void setSamples(const Sample* rawSamples, uint32_t rawSampleCount, uint32_t splitColorSamples);
 
+    // If called with nonzero values, this camera uses a spherical section for ray generation
+    // (instead of the standard perspective transform).
+    void setSphericalWarpSettings(float fovXDegrees, float fovYDegrees);
+
     void setSampleData(const SampleData& sampleData);
     const SampleData& getSampleData() const;
+    const uint32_t getSampleCount() const;
 
     matrix3x3 getSampleToCamera() const;
-    // Beware - this isn't actually suitable for taking a 2D sample coordinate + Z and converting to world space.
-    // Samples can be in any arbitrary space, packing, or function we choose. What's important is that when we
-    // unpack them, they turn into camera-relative 3D rays (origin offset + direction). From there, we can convert
-    // into world space using cameraToWorld.
-    matrix4x4 getSampleToWorld() const;
-    matrix4x4 getWorldToSample() const;
+
     void setCameraToWorld(const transform& cameraToWorld);
     matrix4x4 getCameraToWorld() const;
     const vector3& getTranslation() const;
-    vector3 getForward() const;
+
+    void setupRenderTarget(GPUContext& context);
+    void extractImage();
 
 protected:
+    Sample2Dto3DMappingSettings get2DSampleMappingSettings() const;
+
+    float _fovXDegrees = 0.0f;
+    float _fovYDegrees = 0.0f;
+
     // TODO(anankervis): clean up direct access of protected members by Raycaster
 
     GPUCamera* _gpuCamera;
 
-    matrix4x4 _worldToEyePrevious = matrix4x4::identity();
+    // Initialize to an invalid transform since there is no previous frame on the initial frame
+    matrix4x4 _worldToEyePrevious = matrix4x4::zero();
     matrix3x3 _eyePreviousToSamplePrevious = matrix3x3::identity();
 
     // Incremeted on every render
@@ -116,13 +125,16 @@ protected:
     ThinLens _lens = {0.0f, 1.0f};
     bool _enabled = true;
     ImageResourceDescriptor _renderTarget;
-    RaycasterOutputMode _outputMode = RaycasterOutputMode::COLOR_RGBA8;
+    RaycasterOutputFormat _outputFormat = RaycasterOutputFormat::COLOR_RGBA8;
     FoveatedSampleData _foveatedSampleData;
+
     // Only for polar foveated sampling
     std::vector<vector2ui> _polarRemapToPixel;
 
-    DynamicArray<RayPacketFrustum3D> _blockFrustaTransformed;
-    DynamicArray<RayPacketFrustum3D> _tileFrustaTransformed;
+    struct CPUHierarchy {
+        DynamicArray<RayPacketFrustum3D> _blockFrusta;
+        DynamicArray<RayPacketFrustum3D> _tileFrusta;
+    } _cpuHierarchy;
 
     transform _cameraToWorld = transform::identity();
 

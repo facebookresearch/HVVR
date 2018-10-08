@@ -28,14 +28,14 @@ struct BinTexture {
 
     BinTexture() {}
     explicit BinTexture(const Texture& tex)
-        : format(tex.tex.format), width(tex.tex.width), height(tex.tex.height), stride(tex.tex.stride) {}
+        : format(tex.tex.format), width(tex.tex.width), height(tex.tex.height), stride(tex.tex.strideElements) {}
 
     explicit operator Texture() const {
         hvvr::TextureData texDesc = {};
         texDesc.format = format;
         texDesc.width = width;
         texDesc.height = height;
-        texDesc.stride = stride;
+        texDesc.strideElements = stride;
 
         return Texture(texDesc);
     }
@@ -88,7 +88,7 @@ bool loadBin(const char* path, Model& model) {
             fread(&binTex, sizeof(binTex), 1, file);
             Texture tex(binTex);
 
-            size_t sizeBytes = hvvr::getTextureSize(tex.tex.stride, tex.tex.height, tex.tex.format);
+            size_t sizeBytes = hvvr::getTextureSize(tex.tex.strideElements, tex.tex.height, tex.tex.format);
             tex.tex.data = new uint8_t [sizeBytes];
             fread((void*)tex.tex.data, sizeBytes, 1, file);
 

@@ -15,15 +15,15 @@
 // CUDA vector types
 #include <vector_types.h>
 #if CUDA_COMPILE
-# include <cuda_fp16.h>
-# include <vector_functions.h>
+#include <cuda_fp16.h>
+#include <vector_functions.h>
 #endif
 
 #include <math.h>
 #include <stdint.h>
 
 #ifdef _MSC_VER
-# include <intrin.h> // _CountLeadingZeros
+#include <intrin.h> // _CountLeadingZeros
 #endif
 
 namespace hvvr {
@@ -40,13 +40,6 @@ struct vector2 {
     CHD explicit vector2(const float2& v) : x(v.x), y(v.y) {}
     CHD explicit operator float2() const {
         return {x, y};
-    }
-
-    CHD const float& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD float& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector2 operator-() const {
@@ -157,9 +150,7 @@ CHDI vector2 max(const vector2& a, float b) {
     return vector2(max(a.x, b), max(a.y, b));
 }
 CHDI vector2 clamp(const vector2& a, const vector2& lower, const vector2& upper) {
-    return vector2(
-        clamp(a.x, lower.x, upper.x),
-        clamp(a.y, lower.y, upper.y));
+    return vector2(clamp(a.x, lower.x, upper.x), clamp(a.y, lower.y, upper.y));
 }
 CHDI vector2 clamp(const vector2& a, float lower, float upper) {
     return vector2(clamp(a.x, lower, upper), clamp(a.y, lower, upper));
@@ -189,13 +180,6 @@ struct vector3 {
     CHD explicit vector3(const float3& v) : x(v.x), y(v.y), z(v.z) {}
     CHD explicit operator float3() const {
         return {x, y, z};
-    }
-
-    CHD const float& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD float& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector3 operator-() const {
@@ -261,6 +245,14 @@ struct vector3 {
     CHD bool operator!=(const vector3& v) const {
         return x != v.x || y != v.y || z != v.z;
     }
+
+    // Don't use in kernels!
+    CUDA_HOST const float& operator[](size_t index) const {
+        return *(&x + index);
+    }
+    CUDA_HOST float& operator[](size_t index) {
+        return *(&x + index);
+    }
 };
 
 CHDI vector3 operator+(float a, const vector3& b) {
@@ -306,10 +298,7 @@ CHDI vector3 max(const vector3& a, float b) {
     return vector3(max(a.x, b), max(a.y, b), max(a.z, b));
 }
 CHDI vector3 clamp(const vector3& a, const vector3& lower, const vector3& upper) {
-    return vector3(
-        clamp(a.x, lower.x, upper.x),
-        clamp(a.y, lower.y, upper.y),
-        clamp(a.z, lower.z, upper.z));
+    return vector3(clamp(a.x, lower.x, upper.x), clamp(a.y, lower.y, upper.y), clamp(a.z, lower.z, upper.z));
 }
 CHDI vector3 clamp(const vector3& a, float lower, float upper) {
     return vector3(clamp(a.x, lower, upper), clamp(a.y, lower, upper), clamp(a.z, lower, upper));
@@ -340,13 +329,6 @@ struct vector4 {
     CHD explicit vector4(const float4& v) : x(v.x), y(v.y), z(v.z), w(v.w) {}
     CHD explicit operator float4() const {
         return {x, y, z, w};
-    }
-
-    CHD const float& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD float& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector4 operator-() const {
@@ -454,15 +436,12 @@ CHDI vector4 max(const vector4& a, float b) {
     return vector4(max(a.x, b), max(a.y, b), max(a.z, b), max(a.w, b));
 }
 CHDI vector4 clamp(const vector4& a, const vector4& lower, const vector4& upper) {
-    return vector4(
-        clamp(a.x, lower.x, upper.x),
-        clamp(a.y, lower.y, upper.y),
-        clamp(a.z, lower.z, upper.z),
-        clamp(a.w, lower.w, upper.w));
+    return vector4(clamp(a.x, lower.x, upper.x), clamp(a.y, lower.y, upper.y), clamp(a.z, lower.z, upper.z),
+                   clamp(a.w, lower.w, upper.w));
 }
 CHDI vector4 clamp(const vector4& a, float lower, float upper) {
     return vector4(clamp(a.x, lower, upper), clamp(a.y, lower, upper), clamp(a.z, lower, upper),
-        clamp(a.w, lower, upper));
+                   clamp(a.w, lower, upper));
 }
 CHDI vector4 abs(const vector4& v) {
     return vector4(fabsf(v.x), fabsf(v.y), fabsf(v.z), fabsf(v.w));
@@ -489,7 +468,7 @@ struct half {
 private:
     CHD static uint16_t floatToHalf(float x) {
 #if CUDA_COMPILE
-        return __float2half(x).x;
+        return __half_raw(__float2half(x)).x;
 #else
 #ifdef _MSC_VER
         return _mm_cvtps_ph(_mm_set_ps1(x), 0).m128i_u16[0];
@@ -524,13 +503,6 @@ struct vector2h {
         return vector2(float(x), float(y));
     }
 
-    CHD const half& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD half& operator[](size_t index) {
-        return *(&x + index);
-    }
-
     CHD vector2h operator-() const {
         return vector2h(-x, -y);
     }
@@ -551,13 +523,6 @@ struct vector4h {
     }
     CHD explicit operator vector4() const {
         return vector4(float(x), float(y), float(z), float(w));
-    }
-
-    CHD const half& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD half& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector4h operator-() const {
@@ -582,13 +547,6 @@ struct vector2i {
     CHD explicit vector2i(const int2& v) : x(v.x), y(v.y) {}
     CHD explicit operator int2() const {
         return {x, y};
-    }
-
-    CHD const int32_t& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD int32_t& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector2i operator-() const {
@@ -685,9 +643,7 @@ CHDI vector2i max(const vector2i& a, int32_t b) {
     return vector2i(max(a.x, b), max(a.y, b));
 }
 CHDI vector2i clamp(const vector2i& a, const vector2i& lower, const vector2i& upper) {
-    return vector2i(
-        clamp(a.x, lower.x, upper.x),
-        clamp(a.y, lower.y, upper.y));
+    return vector2i(clamp(a.x, lower.x, upper.x), clamp(a.y, lower.y, upper.y));
 }
 CHDI vector2i clamp(const vector2i& a, int32_t lower, int32_t upper) {
     return vector2i(clamp(a.x, lower, upper), clamp(a.y, lower, upper));
@@ -717,13 +673,6 @@ struct vector2ui {
     CHD explicit vector2ui(const uint2& v) : x(v.x), y(v.y) {}
     CHD explicit operator uint2() const {
         return {x, y};
-    }
-
-    CHD const uint32_t& operator[](size_t index) const {
-        return *(&x + index);
-    }
-    CHD uint32_t& operator[](size_t index) {
-        return *(&x + index);
     }
 
     CHD vector2ui operator+(const vector2ui& v) const {
@@ -813,9 +762,7 @@ CHDI vector2ui max(const vector2ui& a, uint32_t b) {
     return vector2ui(max(a.x, b), max(a.y, b));
 }
 CHDI vector2ui clamp(const vector2ui& a, const vector2ui& lower, const vector2ui& upper) {
-    return vector2ui(
-        clamp(a.x, lower.x, upper.x),
-        clamp(a.y, lower.y, upper.y));
+    return vector2ui(clamp(a.x, lower.x, upper.x), clamp(a.y, lower.y, upper.y));
 }
 CHDI vector2ui clamp(const vector2ui& a, uint32_t lower, uint32_t upper) {
     return vector2ui(clamp(a.x, lower, upper), clamp(a.y, lower, upper));
@@ -1053,6 +1000,7 @@ CHDI transform invert(const transform& t) {
     return transform(translation, rotation, scale);
 }
 
+// Column-major
 struct matrix3x3 {
     vector3 m0, m1, m2;
 
@@ -1132,10 +1080,7 @@ struct matrix3x3 {
     CHD static matrix3x3 crossProductMatrix(const vector3& v) {
         return matrix3x3(vector3(0.0f, v.z, -v.y), vector3(-v.z, 0, v.x), vector3(v.y, -v.x, 0.0f));
     }
-    // Return a matrix which rotates around a unit axis vector. An optional translation
-    // point allows defining a full rigid transform matrix.
-    // Note that the t vector is simply used as the 4th column of the result, so it should
-    // be a point (x,y,z,1) rather than a vector (x,y,z,0).
+    // Return a matrix which rotates around a unit axis vector.
     CHD static matrix3x3 axisAngle(const vector3& axis, float radians) {
         float c = cosf(radians);
         float s = sinf(radians);
@@ -1197,24 +1142,12 @@ CHDI matrix3x3 invert(const matrix3x3& m) {
     const vector3& y = m.m1;
     const vector3& z = m.m2;
 
-    float det =
-        x.x * (y.y * z.z - z.y * y.z) -
-        x.y * (y.x * z.z - y.z * z.x) +
-        x.z * (y.x * z.y - y.y * z.x);
+    float det = x.x * (y.y * z.z - z.y * y.z) - x.y * (y.x * z.z - y.z * z.x) + x.z * (y.x * z.y - y.y * z.x);
 
-    return matrix3x3(
-        vector3(
-            y.y * z.z - z.y * y.z,
-            x.z * z.y - x.y * z.z,
-            x.y * y.z - x.z * y.y),
-        vector3(
-            y.z * z.x - y.x * z.z,
-            x.x * z.z - x.z * z.x,
-            y.x * x.z - x.x * y.z),
-        vector3(
-            y.x * z.y - z.x * y.y,
-            z.x * x.y - x.x * z.y,
-            x.x * y.y - y.x * x.y)) / det;
+    return matrix3x3(vector3(y.y * z.z - z.y * y.z, x.z * z.y - x.y * z.z, x.y * y.z - x.z * y.y),
+                     vector3(y.z * z.x - y.x * z.z, x.x * z.z - x.z * z.x, y.x * x.z - x.x * y.z),
+                     vector3(y.x * z.y - z.x * y.y, z.x * x.y - x.x * z.y, x.x * y.y - y.x * x.y)) /
+           det;
 }
 
 struct matrix4x4 {

@@ -19,8 +19,9 @@
 #define cutilSafeCall(error) __cudaSafeCall(error, __FILE__, __LINE__)
 inline void __cudaSafeCall(cudaError_t error, const char* file, const int line) {
     if (error != cudaSuccess) {
-        fprintf(stderr, "error: CudaSafeCall() failed at %s:%d with %s\n", file, line, cudaGetErrorString(error));
-#ifdef _WIN32
+        fprintf(stderr, "error %d: CudaSafeCall() failed at %s:%d with %s\n", error, file, line,
+                cudaGetErrorString(error));
+#if defined(_WIN32)
         __debugbreak();
 #else
         exit(error);
@@ -57,3 +58,74 @@ struct KernelDim {
 };
 
 #define CUDA_INF __int_as_float(0x7f800000)
+
+
+// Based on https://stackoverflow.com/questions/52286202/dynamic-dispatch-to-template-function-c
+// Use to generate all template function permutations and dispatch properly at runtime for a prefix of template booleans
+// Makes calling cuda kernels with many permutations concise.
+// Example:
+// Change
+// if (b0) {
+// 	if (b1) {
+// 		if (b2) {
+// 			myFunc<true, true, true, otherArgs>(args);
+// 		}
+// 		else {
+// 			myFunc<true, true, false, otherArgs>(args);
+// 		}
+// 	} else {
+// 		if (b2) {
+// 			myFunc<true, false, true, otherArgs>(args);
+// 		}
+// 		else {
+// 			myFunc<true, false, false, otherArgs>(args);
+// 		}
+// 	}
+// } else {
+// 	if (b1) {
+// 		if (b2) {
+// 			myFunc<false, true, true, otherArgs>(args);
+// 		}
+// 		else {
+// 			myFunc<false, true, false, otherArgs>(args);
+// 		}
+// 	} else {
+// 		if (b2) {
+// 			myFunc<false, false, true, otherArgs>(args);
+// 		}
+// 		else {
+// 			myFunc<false, false, false, otherArgs>(args);
+// 		}
+// 	}
+// }
+// into:
+// std::array<bool, 3> bargs = { { b0, b1, b2 } };
+// dispatch_bools<3>{}(bargs, [&](auto...Bargs) {
+//     myFunc<decltype(Bargs)::value..., otherArgs>(args);
+// });
+//
+// You may want to #pragma warning( disable : 4100) around the call, since there will be unrefenced Bargs in the call
+// chain
+template <bool b>
+using kbool = std::integral_constant<bool, b>;
+
+#pragma warning(push)
+#pragma warning(disable : 4100)
+template <std::size_t max>
+struct dispatch_bools {
+    template <std::size_t N, class F, class... Bools>
+    void operator()(std::array<bool, N> const& input, F&& continuation, Bools...) {
+        if (input[max - 1])
+            dispatch_bools<max - 1>{}(input, continuation, kbool<true>{}, Bools{}...);
+        else
+            dispatch_bools<max - 1>{}(input, continuation, kbool<false>{}, Bools{}...);
+    }
+};
+template <>
+struct dispatch_bools<0> {
+    template <std::size_t N, class F, class... Bools>
+    void operator()(std::array<bool, N> const& input, F&& continuation, Bools...) {
+        continuation(Bools{}...);
+    }
+};
+#pragma warning(pop)

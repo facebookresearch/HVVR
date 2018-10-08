@@ -13,7 +13,6 @@
 #include "frusta.h"
 #include "gpu_camera.h"
 #include "gpu_context.h"
-#include "gpu_foveated.h"
 #include "gpu_samples.h"
 #include "graphics_types.h"
 #include "kernel_constants.h"
@@ -24,36 +23,53 @@
 
 namespace hvvr {
 
-// TODO: move to helper header, make generic;
-// potentially optimize down to 4 taps using smart tap placement
-CUDA_DEVICE vector4 bicubic(Texture2D tex, vector2 coord) {
+template <PixelFormat PixelFormat>
+CUDA_DEVICE void writeSurface(vector4 val, Texture2D tex, unsigned int x, unsigned int y) {
+    if (PixelFormat == PixelFormat::RGBA32F) {
+        surf2Dwrite(float4(val), tex.d_surfaceObject, x * sizeof(float4), y);
+    } else if (PixelFormat == PixelFormat::RGBA16) {
+        surf2Dwrite(ToColor4Unorm16(val), tex.d_surfaceObject, x * sizeof(uint64_t), y);
+    } else {
+        surf2Dwrite(ToColor4Unorm8SRgb(val), tex.d_surfaceObject, x * sizeof(uchar4), y);
+    }
+}
+
+// 4-tap B-spline, based on http://vec3.ca/bicubic-filtering-in-fewer-taps/
+CUDA_DEVICE vector4 bicubicFast(Texture2D tex, vector2 coord) {
     vector2 pixCoord = coord * vector2(tex.width, tex.height);
     vector2 pixCenter = vector2(floorf(pixCoord.x - 0.5f), floorf(pixCoord.y - 0.5f)) + 0.5f;
 
     vector2 iDim = vector2(1.0f / tex.width, 1.0f / tex.height);
 
+    vector2 one = vector2(1.0f, 1.0f);
+
     // fractionalOffset
     vector2 f = pixCoord - pixCenter;
     vector2 f2 = f * f;
     vector2 f3 = f2 * f;
-    vector2 omf2 = (vector2(1.0f) - f) * (vector2(1.0f) - f);
-    vector2 omf3 = omf2 * (vector2(1.0f) - f);
+
+    vector2 omf2 = (one - f) * (one - f);
+    vector2 omf3 = omf2 * (one - f);
     float sixth = (1.0f / 6.0f);
-    // B-spline
-    vector2 w[4] = {sixth * omf3, sixth * (4.0f + 3.0f * f3 - 6.0f * f2), sixth * (4.0f + 3.0f * omf3 - 6.0f * omf2),
-                    sixth * f3};
+    vector2 w0 = sixth * omf3;
+    vector2 w1 = ((4.0f / 6.0f) * one + 0.5f * f3 - f2);
+    vector2 w3 = sixth * f3;
+    vector2 w2 = one - w0 - w1 - w3;
 
-    vector2 tc[4] = {pixCenter + vector2(-1), pixCenter, pixCenter + vector2(1), pixCenter + vector2(2)};
+    vector2 s0 = w0 + w1;
+    vector2 s1 = w2 + w3;
 
-    vector4 result = vector4(0.0f);
-    for (int y = 0; y < 4; ++y) {
-        for (int x = 0; x < 4; ++x) {
-            result += vector4(tex2D<float4>(tex.d_texObject, tc[x].x * iDim.x, tc[y].y * iDim.y)) * w[x].x * w[y].y;
-        }
-    }
-    return result;
+    vector2 f0 = w1 / (w0 + w1);
+    vector2 f1 = w3 / (w2 + w3);
+
+    vector2 t0 = (pixCenter - one + f0) * iDim;
+    vector2 t1 = (pixCenter + one + f1) * iDim;
+
+    auto T = tex.d_texObject;
+    // and sample and blend
+    return vector4(tex2D<float4>(T, t0.x, t0.y)) * s0.x * s0.y + vector4(tex2D<float4>(T, t1.x, t0.y)) * s1.x * s0.y +
+           vector4(tex2D<float4>(T, t0.x, t1.y)) * s0.x * s1.y + vector4(tex2D<float4>(T, t1.x, t1.y)) * s1.x * s1.y;
 }
-
 
 CUDA_DEVICE vector2 directionToSampleSpaceSample(const matrix3x3& eyeSpaceToSampleSpaceMatrix,
                                                  const vector3& direction) {
@@ -67,100 +83,65 @@ CUDA_DEVICE_INL bool rectContains(const FloatRect r, const vector2 p) {
     return (p.x >= r.lower.x) && (p.x <= r.upper.x) && (p.y >= r.lower.y) && (p.y <= r.upper.y);
 }
 
-CUDA_KERNEL void TransformFoveatedSamplesToSampleSpaceKernel(
-    const matrix3x3 eyeSpaceToSampleSpaceMatrix,
-    const matrix3x3 eyeSpaceToCameraSpace,
-    const FloatRect cullRect,
-    const PrecomputedDirectionSample* precomputedEyeSpaceSamples,
-    SampleInfo sampleInfo,
-    int* remap,
-    const uint32_t sampleCount) {
+CUDA_KERNEL void TransformFoveatedSamplesToCameraSpaceKernel(const matrix3x3 eyeSpaceToSampleSpaceMatrix,
+                                                             const matrix3x3 eyeSpaceToCameraSpace,
+                                                             const FloatRect cullRect,
+                                                             const DirectionalBeam* eyeSpaceSamples,
+                                                             CameraBeams cameraBeams,
+                                                             int* remap,
+                                                             const uint32_t sampleCount) {
     unsigned index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index < sampleCount) {
-        vector3 direction = precomputedEyeSpaceSamples[index].center;
+        DirectionalBeam eyeBeam = eyeSpaceSamples[index];
         vector2 c = {CUDA_INF, CUDA_INF};
-        if ((eyeSpaceToCameraSpace * direction).z < 0.0f) {
-            vector2 s = directionToSampleSpaceSample(eyeSpaceToSampleSpaceMatrix, direction);
+        DirectionalBeam cameraBeam = eyeSpaceToCameraSpace * eyeBeam;
+        if (cameraBeam.centerRay.z < 0.0f) {
+            vector2 s = directionToSampleSpaceSample(eyeSpaceToSampleSpaceMatrix, eyeBeam.centerRay);
             if (rectContains(cullRect, s)) {
-                c = s;
-                vector2 d1 =
-                    directionToSampleSpaceSample(eyeSpaceToSampleSpaceMatrix, precomputedEyeSpaceSamples[index].d1) - c;
-                vector2 d2 =
-                    directionToSampleSpaceSample(eyeSpaceToSampleSpaceMatrix, precomputedEyeSpaceSamples[index].d2) - c;
-                float sqExtent1 = dot(d1, d1);
-                float sqExtent2 = dot(d2, d2);
-                ;
-                Sample::Extents extent;
-                if (sqExtent1 > sqExtent2) {
-                    extent.minorAxis = d2;
-                    extent.majorAxisLength = sqrtf(sqExtent1);
-                } else if (sqExtent2 == 0) {
-                    extent.minorAxis.x = 0;
-                    extent.minorAxis.y = 0;
-                    extent.majorAxisLength = 0;
-                } else { // sqExtent2 >= sqExtent1, sqExtent2 != 0
-                    extent.minorAxis = d1;
-                    extent.majorAxisLength = sqrtf(sqExtent2);
-                }
                 remap[index] = (int)index;
-                sampleInfo.extents[index] = extent;
             }
         }
-        sampleInfo.centers[index] = c;
+        cameraBeams.directionalBeams[index] = cameraBeam;
     }
 }
 
-void TransformFoveatedSamplesToSampleSpace(const matrix3x3& eyeSpaceToSampleSpaceMatrix,
+void TransformFoveatedSamplesToCameraSpace(const matrix3x3& eyeSpaceToSampleSpaceMatrix,
                                            const matrix3x3& eyeSpaceToCameraSpaceMatrix,
                                            const FloatRect& sampleBounds,
-                                           const PrecomputedDirectionSample* d_precomputedEyeSpaceSamples,
-                                           SampleInfo sampleInfo,
+                                           const DirectionalBeam* d_eyeBeams,
+                                           CameraBeams cameraBeams,
                                            int* d_remap,
                                            const uint32_t sampleCount,
                                            cudaStream_t stream) {
     KernelDim dim = KernelDim(sampleCount, CUDA_GROUP_SIZE);
-    TransformFoveatedSamplesToSampleSpaceKernel<<<dim.grid, dim.block, 0, stream>>>(
-        eyeSpaceToSampleSpaceMatrix, eyeSpaceToCameraSpaceMatrix, sampleBounds, d_precomputedEyeSpaceSamples,
-        sampleInfo, d_remap, sampleCount);
+    TransformFoveatedSamplesToCameraSpaceKernel<<<dim.grid, dim.block, 0, stream>>>(
+        eyeSpaceToSampleSpaceMatrix, eyeSpaceToCameraSpaceMatrix, sampleBounds, d_eyeBeams, cameraBeams, d_remap,
+        sampleCount);
 }
 
 struct EccentricityToTexCoordMapping {
-    float maxEccentricityRadians;
-    float* forwardMap;
-    float forwardMapSize;
-    float* backwardMap;
-    float backwardMapSize;
+    EccentricityMap eccentricityMap;
+    float texMapSize;
+    float invTexMapSize;
+    float invMaxEccentricity;
 };
 
 void GPUCamera::getEccentricityMap(EccentricityToTexCoordMapping& map) const {
-    map.maxEccentricityRadians = maxEccentricityRadians;
-    map.forwardMap = d_eccentricityCoordinateMap;
-    map.forwardMapSize = (float)d_eccentricityCoordinateMap.size();
-    map.backwardMap = (float*)d_ringEccentricities;
-    map.backwardMapSize = (float)d_ringEccentricities.size();
-}
-
-CUDA_DEVICE float bilinearRead1D(float coord, float* map, float mapSize) {
-    float pixelCoord = coord * mapSize - 0.5f;
-    float integralPart = floor(pixelCoord);
-    int maxCoord = (int)mapSize - 1;
-    int lowerCoord = clamp((int)integralPart, 0, maxCoord);
-    int upperCoord = clamp((int)integralPart + 1, 0, maxCoord);
-    float alpha = pixelCoord - integralPart;
-    return lerp(map[lowerCoord], map[upperCoord], alpha);
+    map.eccentricityMap = eccentricityMap;
+    map.texMapSize = (float)polarTextures.raw.height;
+    map.invTexMapSize = 1.0f / polarTextures.raw.height;
+    map.invMaxEccentricity = 1.0f / maxEccentricityRadians;
 }
 
 // eccentricity is in the range [0,maxEccentricityRadians]
 CUDA_DEVICE float eccentricityToTexCoord(float eccentricity, EccentricityToTexCoordMapping eToTexMap) {
-    float normalizedE = eccentricity / eToTexMap.maxEccentricityRadians;
-    return bilinearRead1D(normalizedE, eToTexMap.forwardMap, eToTexMap.forwardMapSize);
+    return (eToTexMap.eccentricityMap.applyInverse(eccentricity) + 0.5f) * eToTexMap.invTexMapSize;
 }
 
 CUDA_DEVICE vector2 getNormalizedCoord(int x, int y, int width, int height) {
     return vector2(((float)x + 0.5f) / (float)width, ((float)y + 0.5f) / (float)height);
 }
 
-// TODO: Canonicalize the negations...
 // Aligned along z axis
 CUDA_DEVICE vector3 angularEyeCoordToDirection(float theta, float e) {
     float z = -cosf(e);
@@ -169,7 +150,6 @@ CUDA_DEVICE vector3 angularEyeCoordToDirection(float theta, float e) {
     return {xy.x, xy.y, z};
 }
 CUDA_DEVICE void eyeSpaceDirectionToAngularEyeCoord(vector3 dir, float& theta, float& eccentricity) {
-    // TODO: get rid of transcendentals in calculation
     eccentricity = acosf(-dir.z);
     // Angle of rotation about z, measured from x
     theta = -atan2f(dir.y, dir.x);
@@ -179,7 +159,7 @@ CUDA_DEVICE void polarTextureCoordToAngularEyeCoord(vector2 coord,
                                                     EccentricityToTexCoordMapping eToTexMap,
                                                     float& theta,
                                                     float& eccentricity) {
-    eccentricity = bilinearRead1D(coord.y, eToTexMap.backwardMap, eToTexMap.backwardMapSize);
+    eccentricity = eToTexMap.eccentricityMap.apply(coord.y * eToTexMap.texMapSize - 0.5f);
     theta = (2.0f * Pi * coord.x) - Pi;
 }
 CUDA_DEVICE vector2 angularEyeCoordToPolarTextureCoord(float theta,
@@ -207,15 +187,17 @@ CUDA_DEVICE void computeMoments3x3Window(
     m_2 *= weight;
 }
 
-CUDA_DEVICE vector4 sqrtf(vector4 v) {
-    return vector4(v.x, v.y, v.z, v.w);
+CUDA_DEVICE vector4 sqrt(vector4 v) {
+    return vector4(sqrtf(v.x), sqrtf(v.y), sqrtf(v.z), sqrtf(v.w));
 }
 
-CUDA_DEVICE vector4 clampToNeighborhood(
-    vector4 oldValue, cudaTextureObject_t tex, vector2 coord, vector2 invDim, TemporalFilterSettings settings) {
-    vector4 m_1, m_2;
-    computeMoments3x3Window(tex, coord, invDim, m_1, m_2);
-    vector4 stdDev = sqrtf(m_2 - (m_1 * m_1));
+CUDA_DEVICE vector4 clampToNeighborhood(vector4 oldValue,
+                                        GPUCamera::PolarTextures polarTex,
+                                        vector2 coord,
+                                        TemporalFilterSettings settings) {
+    vector4 m_1 = vector4(tex2D<float4>(polarTex.moment1.d_texObject, coord.x, coord.y));
+    vector4 m_2 = vector4(tex2D<float4>(polarTex.moment2.d_texObject, coord.x, coord.y));
+    vector4 stdDev = sqrt(m_2 - (m_1 * m_1));
     // Arbitrary
     float scaleFactor = settings.stddevMultiplier;
     vector4 minC = m_1 - (stdDev * scaleFactor);
@@ -224,13 +206,27 @@ CUDA_DEVICE vector4 clampToNeighborhood(
 }
 
 template <PixelFormat PixelFormat>
-CUDA_KERNEL void FoveatedPolarToScreenSpaceKernel(Texture2D polarImage,
+CUDA_KERNEL void ComputeMoments(GPUCamera::PolarTextures polarTex) {
+    unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned j = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (i < polarTex.raw.width && j < polarTex.raw.height) {
+        vector4 m_1, m_2;
+        vector2 invDim = vector2(1.0f / polarTex.raw.width, 1.0f / polarTex.raw.height);
+        vector2 coord = vector2(invDim.x * i, invDim.y * j);
+        computeMoments3x3Window(polarTex.raw.d_texObject, coord, invDim, m_1, m_2);
+        writeSurface<PixelFormat>(m_1, polarTex.moment1, i, j);
+        writeSurface<PixelFormat>(m_2, polarTex.moment2, i, j);
+    }
+}
+
+template <PixelFormat PixelFormat>
+CUDA_KERNEL void FoveatedPolarToScreenSpaceKernel(GPUCamera::PolarTextures polarTex,
                                                   Texture2D resultTexture,
                                                   GPUImage resultImage,
                                                   matrix3x3 sampleSpaceToEyeSpaceMatrix,
                                                   EccentricityToTexCoordMapping eToTexMap,
-                                                  Texture2D previousImage,
-                                                  Texture2D polarFoveatedTMaxImage,
+                                                  Texture2D previousResultTexture,
                                                   matrix4x4 eyeSpaceToPreviousSampleSpaceMatrix,
                                                   TemporalFilterSettings settings) {
     unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -241,19 +237,23 @@ CUDA_KERNEL void FoveatedPolarToScreenSpaceKernel(Texture2D polarImage,
         vector3 sampleSpacePoint = vector3(normalizedCoord, 1.0f);
         vector3 eyeSpaceDirection = normalize(sampleSpaceToEyeSpaceMatrix * sampleSpacePoint);
 
+
         float theta, eccentricity;
         eyeSpaceDirectionToAngularEyeCoord(eyeSpaceDirection, theta, eccentricity);
 
+        /** Display full mapping, for debugging
+        theta = normalizedCoord.x * 2.0f * Pi;
+        eccentricity = normalizedCoord.y * eToTexMap.invMaxEccentricity;
+        */
+
         vector2 coord = angularEyeCoordToPolarTextureCoord(theta, eccentricity, eToTexMap);
 
-        vector4 newValue = bicubic(polarImage, coord);
+        vector4 newValue = bicubicFast(polarTex.raw, coord);
         vector4 result = newValue;
         vector4 surfaceResult = result;
-        if (!settings.inPolarSpace) {
-            float tValue = tex2D<float>(polarFoveatedTMaxImage.d_texObject, coord.x, coord.y);
-            // Clamp infinity. TODO: something more robust
-            tValue = min(tValue, 1000.0f);
 
+        float tValue = tex2D<float>(polarTex.depth.d_texObject, coord.x, coord.y);
+        if (tValue < CUDA_INF) {
             vector3 currentEyePosition = angularEyeCoordToDirection(theta, eccentricity) * tValue;
 
             vector4 prevSamplePosition = eyeSpaceToPreviousSampleSpaceMatrix * vector4(currentEyePosition, 1.0f);
@@ -262,81 +262,38 @@ CUDA_KERNEL void FoveatedPolarToScreenSpaceKernel(Texture2D polarImage,
             float alpha = settings.alpha;
             vector4 oldValue = newValue;
             if (oldTexCoord.x > 0 && oldTexCoord.y > 0 && oldTexCoord.x < 1 && oldTexCoord.y < 1 && tValue > 0) {
-                oldValue = vector4(tex2D<float4>(previousImage.d_texObject, oldTexCoord.x, oldTexCoord.y));
+                oldValue = vector4(tex2D<float4>(previousResultTexture.d_texObject, oldTexCoord.x, oldTexCoord.y));
             }
-            // TODO: could compute the moments in a prepass
-            vector2 invDim = vector2(1.0f / polarImage.width, 1.0f / polarImage.height);
-            vector4 clampedOldValue = clampToNeighborhood(oldValue, polarImage.d_texObject, coord, invDim, settings);
+
+
+            vector4 clampedOldValue = clampToNeighborhood(oldValue, polarTex, coord, settings);
+
+            // Make alpha settings be dependent on eccentricity. Make it higher in fovea and lower toward periphery
+            float normalizedE = eccentricity * eToTexMap.invMaxEccentricity;
+            float mn = 0.2f, mx = 0.35f;
+            float t = clamp((normalizedE - mn) / (mx - mn), 0.f, 1.f);
+            alpha = lerp(0.5f, alpha, t);
+
+            // Heuristic hack! Turn down TAA clamping in the periphery
+            normalizedE = sqrtf(sqrtf(sqrtf(sqrtf(normalizedE))));
+            clampedOldValue.x = lerp(clampedOldValue.x, oldValue.x, normalizedE);
+            clampedOldValue.y = lerp(clampedOldValue.y, oldValue.y, normalizedE);
+            clampedOldValue.z = lerp(clampedOldValue.z, oldValue.z, normalizedE);
+            clampedOldValue.w = lerp(clampedOldValue.w, oldValue.w, normalizedE);
+
             surfaceResult = alpha * newValue + (1.0f - alpha) * clampedOldValue;
             result = surfaceResult;
         }
 
-        // DEBUG CODE:
-        // surfaceResult = vector4(tex2D<float4>(polarImage.d_texObject, normalizedCoord.x, normalizedCoord.y));
-        // result = surfaceResult;
 
         if (PixelFormat == PixelFormat::RGBA32F) {
             vector4* output = (vector4*)resultImage.data();
             output[resultImage.stride() * j + i] = result;
-            if (!settings.inPolarSpace) {
-                surf2Dwrite(float4(surfaceResult), resultTexture.d_surfaceObject, i * sizeof(float4), j);
-            }
         } else {
             uint32_t* output = (uint32_t*)resultImage.data();
             output[resultImage.stride() * j + i] = ToColor4Unorm8SRgb(result);
-            if (!settings.inPolarSpace) {
-                surf2Dwrite(ToColor4Unorm8SRgb(surfaceResult), resultTexture.d_surfaceObject, i * sizeof(uchar4), j);
-            }
         }
-    }
-}
-
-template <PixelFormat PixelFormat>
-CUDA_KERNEL void FoveatedTemporalFilterKernel(Texture2D rawImage,
-                                              Texture2D previousImage,
-                                              Texture2D polarFoveatedTMaxImage,
-                                              EccentricityToTexCoordMapping eToTexMap,
-                                              matrix4x4 eyeToEyePrevious,
-                                              TemporalFilterSettings settings,
-                                              Texture2D resultImage) {
-    unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned j = blockIdx.y * blockDim.y + threadIdx.y;
-
-    if (i < rawImage.width && j < rawImage.height) {
-        vector2 invDim = vector2(1.0f / rawImage.width, 1.0f / rawImage.height);
-        vector2 coord = vector2(i + 0.5f, j + 0.5f) * invDim;
-        float tValue = tex2D<float>(polarFoveatedTMaxImage.d_texObject, coord.x, coord.y);
-        vector4 newValue(tex2D<float4>(rawImage.d_texObject, coord.x, coord.y));
-        vector4 result = newValue;
-        if (tValue < CUDA_INF) {
-            float theta, e;
-            polarTextureCoordToAngularEyeCoord(coord, eToTexMap, theta, e);
-
-            vector3 currentEyePosition = angularEyeCoordToDirection(theta, e) * tValue;
-
-            vector4 prevEyePosition = eyeToEyePrevious * vector4(currentEyePosition, 1.0f);
-
-            float prevTheta, prevE;
-            eyeSpaceDirectionToAngularEyeCoord(normalize(vector3(prevEyePosition)), prevTheta, prevE);
-
-            vector2 oldTexCoord = angularEyeCoordToPolarTextureCoord(prevTheta, prevE, eToTexMap);
-
-            float alpha = settings.alpha;
-
-            vector4 oldValue(tex2D<float4>(previousImage.d_texObject, oldTexCoord.x, oldTexCoord.y));
-
-            // TODO: could compute the moments in a prepass
-            vector4 clampedOldValue = clampToNeighborhood(oldValue, rawImage.d_texObject, coord, invDim, settings);
-            result = alpha * newValue + (1.0f - alpha) * clampedOldValue;
-        }
-
-        // vector2 diff = (oldTexCoord - coord);
-        // result = newValue;// {tValue, -tValue, 0.0f, 0.0f};
-        if (PixelFormat == PixelFormat::RGBA32F) {
-            surf2Dwrite(float4(result), resultImage.d_surfaceObject, i * sizeof(float4), j);
-        } else {
-            surf2Dwrite(ToColor4Unorm8SRgb(result), resultImage.d_surfaceObject, i * sizeof(uchar4), j);
-        }
+        writeSurface<PixelFormat>(surfaceResult, resultTexture, i, j);
     }
 }
 
@@ -354,6 +311,9 @@ CUDA_DEVICE vector4 texelFetch(Texture2D tex, unsigned i, unsigned j) {
     return vector4(tex2D<float4>(tex.d_texObject, coord.x, coord.y));
 }
 
+// The reliance on eccentricity is a pure guess, a better implementation would make this more principled or
+// at least try and obtain the formula used (but not published) in
+// https://research.nvidia.com/sites/default/files/publications/supplementary.pdf
 template <PixelFormat PixelFormat>
 CUDA_KERNEL void SeparableFilterUsingEccentricity(Texture2D output,
                                                   Texture2D input,
@@ -365,16 +325,15 @@ CUDA_KERNEL void SeparableFilterUsingEccentricity(Texture2D output,
 
     if (i < output.width && j < output.height) {
         float eccentricity = getEccentricity(i, j, output, sampleSpaceToEyeSpaceMatrix);
-        // TODO: compute filter radius
-        int filterRadius = 5;
 
+        int filterRadius = 5;
         vector4 valueSum = vector4(0.0f, 0.0f, 0.0f, 0.0f);
         float weightSum = 0.0f;
         for (int R = -filterRadius; R <= filterRadius; ++R) {
             vector2i tapLoc(clamp((int)i + R * step.x, (int)0, (int)output.width - 1),
                             clamp((int)j + R * step.y, (int)0, (int)output.height - 1));
-            // TODO: compute filter weight
-            float weight = 1.0f;
+            float normDist = fabsf(float(R)) / float(filterRadius + 0.1);
+            float weight = powf(1.0f - normDist, sqrtf(eccentricity));
             valueSum += texelFetch(input, tapLoc.x, tapLoc.y) * weight;
             weightSum += weight;
         }
@@ -398,14 +357,19 @@ CUDA_KERNEL void FinishConstrastEnhancement(GPUImage resultImage,
                                             Texture2D unfilteredTexture,
                                             Texture2D filteredTexture,
                                             ContrastEnhancementSettings settings,
-                                            matrix3x3 sampleSpaceToEyeSpaceMatrix) {
+                                            matrix3x3 sampleSpaceToEyeSpaceMatrix,
+                                            EccentricityToTexCoordMapping eToTexMap) {
     unsigned i = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned j = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (i < resultImage.width() && j < resultImage.height()) {
         // TODO: compute sigma
         float eccentricity = getEccentricity(i, j, unfilteredTexture, sampleSpaceToEyeSpaceMatrix);
-        float sigma = 1.0f;
+        float sigma = 8.0f;
+
+        float t = eccentricity * eToTexMap.invMaxEccentricity;
+
+        sigma *= max(0.001f, clamp(t * t, 0.f, 1.f));
 
         vector4 pix = texelFetch(unfilteredTexture, i, j);
         vector4 pmean = texelFetch(filteredTexture, i, j);
@@ -417,76 +381,34 @@ CUDA_KERNEL void FinishConstrastEnhancement(GPUImage resultImage,
     }
 }
 
-static void textureCopy(Texture2D dst, Texture2D src) {
-    assert(dst.width == src.width && dst.height == src.height && dst.format == src.format);
-    cutilSafeCall(cudaMemcpy2DArrayToArray(dst.d_rawMemory, 0, 0, src.d_rawMemory, 0, 0, dst.width * dst.elementSize,
-                                           dst.height));
-}
-
-void GPUCamera::foveatedPolarTemporalFilter(const matrix4x4& eyeToEyePrevious) {
-    size_t width = polarFoveatedImage.width;
-    size_t height = polarFoveatedImage.height;
-    KernelDim dim = KernelDim(width, height, CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
-
-    EccentricityToTexCoordMapping eToTexMap;
-    getEccentricityMap(eToTexMap);
-
-    switch (outputModeToPixelFormat(outputMode)) {
-        case PixelFormat::RGBA32F:
-            FoveatedTemporalFilterKernel<PixelFormat::RGBA32F><<<dim.grid, dim.block, 0, stream>>>(
-                rawPolarFoveatedImage, previousPolarFoveatedImage, polarFoveatedDepthImage, eToTexMap, eyeToEyePrevious,
-                temporalFilterSettings, polarFoveatedImage);
-            break;
-        case PixelFormat::RGBA8_SRGB:
-            FoveatedTemporalFilterKernel<PixelFormat::RGBA8_SRGB><<<dim.grid, dim.block, 0, stream>>>(
-                rawPolarFoveatedImage, previousPolarFoveatedImage, polarFoveatedDepthImage, eToTexMap, eyeToEyePrevious,
-                temporalFilterSettings, polarFoveatedImage);
-            break;
-        default:
-            assert(false);
-    }
-    // TODO: could ping-pong buffers to save a copy
-    textureCopy(previousPolarFoveatedImage, polarFoveatedImage);
-}
-
 void GPUCamera::foveatedPolarToScreenSpace(const matrix4x4& eyeToEyePrevious,
                                            const matrix3x3& eyePreviousToSamplePrevious,
                                            const matrix3x3& sampleToEye) {
-    bool filterInPolarSpace = temporalFilterSettings.inPolarSpace;
-    if (filterInPolarSpace) {
-        foveatedPolarTemporalFilter(eyeToEyePrevious);
-    }
-
     KernelDim dim = KernelDim(resultImage.width(), resultImage.height(), CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
-    Texture2D currentPolarFoveatedImage = filterInPolarSpace ? polarFoveatedImage : rawPolarFoveatedImage;
+    KernelDim polDim =
+        KernelDim(polarTextures.raw.width, polarTextures.raw.height, CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
     matrix4x4 eyeToSamplePrevious = matrix4x4(eyePreviousToSamplePrevious) * eyeToEyePrevious;
 
     EccentricityToTexCoordMapping eToTexMap;
     getEccentricityMap(eToTexMap);
-
+    ComputeMoments<PixelFormat::RGBA16><<<polDim.grid, polDim.block, 0, stream>>>(polarTextures);
     switch (outputModeToPixelFormat(outputMode)) {
         case PixelFormat::RGBA32F:
             FoveatedPolarToScreenSpaceKernel<PixelFormat::RGBA32F><<<dim.grid, dim.block, 0, stream>>>(
-                currentPolarFoveatedImage, resultTexture, resultImage, sampleToEye, eToTexMap, previousResultTexture,
-                polarFoveatedDepthImage, eyeToSamplePrevious, temporalFilterSettings);
+                polarTextures, resultTexture, resultImage, sampleToEye, eToTexMap, previousResultTexture,
+                eyeToSamplePrevious, temporalFilterSettings);
             break;
         case PixelFormat::RGBA8_SRGB:
             FoveatedPolarToScreenSpaceKernel<PixelFormat::RGBA8_SRGB><<<dim.grid, dim.block, 0, stream>>>(
-                currentPolarFoveatedImage, resultTexture, resultImage, sampleToEye, eToTexMap, previousResultTexture,
-                polarFoveatedDepthImage, eyeToSamplePrevious, temporalFilterSettings);
+                polarTextures, resultTexture, resultImage, sampleToEye, eToTexMap, previousResultTexture,
+                eyeToSamplePrevious, temporalFilterSettings);
             break;
         default:
             assert(false);
     }
 
-    // TODO: could ping-pong buffers to save a copy
-    textureCopy(previousResultTexture, resultTexture);
-
     if (contrastEnhancementSettings.enable) {
         assert(outputModeToPixelFormat(outputMode) == PixelFormat::RGBA8_SRGB);
-        assert(filterInPolarSpace == false);
-        // TODO: Probably cheaper to compute eccentricity once per pixel and store in
-        // single channel 16F texture; and reuse in all three kernels
         SeparableFilterUsingEccentricity<PixelFormat::RGBA8_SRGB>
             <<<dim.grid, dim.block, 0, stream>>>(contrastEnhancementBuffers.horizontallyFiltered, resultTexture, {0, 1},
                                                  contrastEnhancementSettings, sampleToEye);
@@ -495,36 +417,26 @@ void GPUCamera::foveatedPolarToScreenSpace(const matrix4x4& eyeToEyePrevious,
             contrastEnhancementSettings, sampleToEye);
         FinishConstrastEnhancement<PixelFormat::RGBA8_SRGB>
             <<<dim.grid, dim.block, 0, stream>>>(resultImage, resultTexture, contrastEnhancementBuffers.fullyFiltered,
-                                                 contrastEnhancementSettings, sampleToEye);
+                                                 contrastEnhancementSettings, sampleToEye, eToTexMap);
     }
+
+    std::swap(previousResultTexture, resultTexture);
 }
 
-void GPUCamera::updateEyeSpaceFoveatedSamples(
-    const ArrayView<PrecomputedDirectionSample> precomputedDirectionalSamples) {
-    d_foveatedDirectionalSamples = GPUBuffer<PrecomputedDirectionSample>(precomputedDirectionalSamples.cbegin(),
-                                                                         precomputedDirectionalSamples.cend());
+void GPUCamera::updateEyeSpaceFoveatedSamples(const ArrayView<DirectionalBeam> eyeBeams) {
+    d_foveatedEyeDirectionalSamples = GPUBuffer<DirectionalBeam>(eyeBeams.cbegin(), eyeBeams.cend());
 
     // Allocate and calculate eye-space frusta
-    uint32_t blockCount = ((uint32_t)precomputedDirectionalSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    uint32_t blockCount = ((uint32_t)eyeBeams.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
     d_foveatedEyeSpaceTileFrusta = GPUBuffer<SimpleRayFrustum>(blockCount * TILES_PER_BLOCK);
     d_foveatedEyeSpaceBlockFrusta = GPUBuffer<SimpleRayFrustum>(blockCount);
     d_foveatedWorldSpaceTileFrusta = GPUBuffer<SimpleRayFrustum>(blockCount * TILES_PER_BLOCK);
     d_foveatedWorldSpaceBlockFrusta = GPUBuffer<SimpleRayFrustum>(blockCount);
 
-    ComputeEyeSpaceFrusta(d_foveatedDirectionalSamples, d_foveatedEyeSpaceTileFrusta, d_foveatedEyeSpaceBlockFrusta);
-
-    d_tileFrusta = GPUBuffer<GPURayPacketFrustum>(blockCount * TILES_PER_BLOCK);
-    d_cullBlockFrusta = GPUBuffer<GPURayPacketFrustum>(blockCount);
+    ComputeEyeSpaceFrusta(d_foveatedEyeDirectionalSamples, d_foveatedEyeSpaceTileFrusta, d_foveatedEyeSpaceBlockFrusta);
 
     safeCudaEventDestroy(transferTileToCPUEvent);
     cutilSafeCall(cudaEventCreateWithFlags(&transferTileToCPUEvent, cudaEventDisableTiming));
-
-    safeCudaFreeHost(tileFrustaPinned);
-    safeCudaFreeHost(cullBlockFrustaPinned);
-
-    cutilSafeCall(
-        cudaMallocHost((void**)&tileFrustaPinned, sizeof(GPURayPacketFrustum) * blockCount * TILES_PER_BLOCK));
-    cutilSafeCall(cudaMallocHost((void**)&cullBlockFrustaPinned, sizeof(GPURayPacketFrustum) * blockCount));
 
     safeCudaFreeHost(foveatedWorldSpaceTileFrustaPinned);
     safeCudaFreeHost(foveatedWorldSpaceBlockFrustaPinned);
@@ -534,31 +446,48 @@ void GPUCamera::updateEyeSpaceFoveatedSamples(
     cutilSafeCall(cudaMallocHost((void**)&foveatedWorldSpaceBlockFrustaPinned, sizeof(SimpleRayFrustum) * blockCount));
 }
 
+Plane operator*(matrix4x4 M, Plane p) {
+    vector4 O = vector4(p.normal * p.dist, 1.0f);
+    O = M * O;
+    vector3 N = vector3(transpose(invert(M)) * vector4(p.normal, 0));
+    return Plane{N, dot(vector3(O), N)};
+}
+
 void GPUCamera::updatePerFrameFoveatedData(const FloatRect& sampleBounds,
                                            const matrix3x3& cameraToSample,
                                            const matrix3x3& eyeToCamera,
                                            const matrix4x4& eyeToWorld) {
-    validSampleCount = uint32_t(d_foveatedDirectionalSamples.size());
-    SampleInfo sampleInfo(*this);
-    uint32_t tileCount = uint32_t(d_tileFrusta.size());
-    uint32_t blockCount = uint32_t(d_cullBlockFrusta.size());
-    assert(d_foveatedWorldSpaceBlockFrusta.size() == d_cullBlockFrusta.size());
+    validSampleCount = uint32_t(d_foveatedEyeDirectionalSamples.size());
+    CameraBeams cameraBeams(*this);
+    uint32_t tileCount = uint32_t(d_foveatedWorldSpaceTileFrusta.size());
+    uint32_t blockCount = uint32_t(d_foveatedWorldSpaceBlockFrusta.size());
 
-    ResetCullFrusta(d_cullBlockFrusta, d_tileFrusta, tileCount, blockCount, stream);
 
     matrix3x3 eyeToSample = cameraToSample * eyeToCamera;
-    TransformFoveatedSamplesToSampleSpace(eyeToSample, eyeToCamera, sampleBounds, d_foveatedDirectionalSamples,
-                                          sampleInfo, d_sampleRemap, validSampleCount, stream);
+    TransformFoveatedSamplesToCameraSpace(eyeToSample, eyeToCamera, sampleBounds, d_foveatedEyeDirectionalSamples,
+                                          cameraBeams, d_sampleRemap, validSampleCount, stream);
 
-    CalculateSampleCullFrusta(d_cullBlockFrusta, d_tileFrusta, sampleInfo, validSampleCount, tileCount, blockCount,
-                              stream);
-    // Queue the copy back
-    d_cullBlockFrusta.readbackAsync(cullBlockFrustaPinned, stream);
-    d_tileFrusta.readbackAsync(tileFrustaPinned, stream);
+    auto sampleToCamera = invert(cameraToSample);
+
+    auto U = sampleBounds.upper;
+    auto L = sampleBounds.lower;
+
+    vector2 sampleDirs[4] = {{U.x, U.y}, {L.x, U.y}, {L.x, L.y}, {U.x, L.y}};
+
+    const float EPSILON = -0.01f;
+    FourPlanes cullPlanes;
+    for (int i = 0; i < 4; ++i) {
+        vector3 dir0 = sampleToCamera * vector3(sampleDirs[i], 1.0f);
+        vector3 dir1 = sampleToCamera * vector3(sampleDirs[(i + 1) % 4], 1.0f);
+        Plane eyeSpacePlane;
+        eyeSpacePlane.normal = invert(eyeToCamera) * normalize(cross(dir1, dir0));
+        eyeSpacePlane.dist = EPSILON;
+        cullPlanes.data[i] = eyeToWorld * eyeSpacePlane;
+    }
 
     CalculateWorldSpaceFrusta(d_foveatedWorldSpaceBlockFrusta, d_foveatedWorldSpaceTileFrusta,
-                              d_foveatedEyeSpaceBlockFrusta, d_foveatedEyeSpaceTileFrusta, eyeToWorld, blockCount,
-                              tileCount, stream);
+                              d_foveatedEyeSpaceBlockFrusta, d_foveatedEyeSpaceTileFrusta, eyeToWorld, cullPlanes,
+                              blockCount, tileCount, stream);
     // Queue the copy back
     d_foveatedWorldSpaceBlockFrusta.readbackAsync(foveatedWorldSpaceBlockFrustaPinned, stream);
     d_foveatedWorldSpaceTileFrusta.readbackAsync(foveatedWorldSpaceTileFrustaPinned, stream);

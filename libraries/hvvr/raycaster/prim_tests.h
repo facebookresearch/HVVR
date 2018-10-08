@@ -116,23 +116,37 @@ CUDA_DEVICE_INL IntersectResult TestTriangleFrustaUVW(const SimpleRayFrustum& ra
     return intersect_all_in;
 }
 
-// tile-wide values
-struct IntersectTriangleTile {
-    float t;
+CUDA_DEVICE_INL void GetDifferentials(vector3 edge0,
+                                      vector3 edge1,
+                                      vector3 v0ToRayOrigin,
+                                      vector3 majorDirDiff,
+                                      vector3 minorDirDiff,
+                                      vector2& dDenomDAlpha,
+                                      vector2& dVdAlpha,
+                                      vector2& dWdAlpha) {
+    vector3 normal = cross(edge0, edge1);
+    dDenomDAlpha = vector2(dot(-majorDirDiff, normal), dot(-minorDirDiff, normal));
 
+    dVdAlpha =
+        vector2(dot(edge1, cross(-majorDirDiff, v0ToRayOrigin)), dot(edge1, cross(-minorDirDiff, v0ToRayOrigin)));
+
+    dWdAlpha =
+        vector2(-dot(edge0, cross(-majorDirDiff, v0ToRayOrigin)), -dot(edge0, cross(-minorDirDiff, v0ToRayOrigin)));
+}
+
+// tile-wide values
+template <bool DoF>
+struct IntersectTriangleTile;
+
+template <>
+struct IntersectTriangleTile<false> {
+    float t;
     vector3 edge0;
     vector3 edge1;
     vector3 v0ToRayOrigin;
 
-    vector2 dDenomDAlpha;
-    vector2 dVdAlpha;
-    vector2 dWdAlpha;
-
     // returns false if no rays originating at rayOrigin can intersect the triangle's plane (assumes backface testing)
-    CUDA_DEVICE IntersectResult setup(const PrecomputedTriangleIntersect& triPrecomp,
-                                      vector3 rayOrigin,
-                                      vector3 majorDirDiff,
-                                      vector3 minorDirDiff) {
+    CUDA_DEVICE IntersectResult setup(const PrecomputedTriangleIntersect& triPrecomp, vector3 rayOrigin) {
         vector3 v0 = triPrecomp.v0;
         edge0 = triPrecomp.edge0;
         edge1 = triPrecomp.edge1;
@@ -146,14 +160,6 @@ struct IntersectTriangleTile {
         if (t < 0.0f)
             return intersect_all_out; // ray origin is behind the triangle's plane
 
-        dDenomDAlpha = vector2(dot(-majorDirDiff, normal), dot(-minorDirDiff, normal));
-
-        dVdAlpha =
-            vector2(dot(edge1, cross(-majorDirDiff, v0ToRayOrigin)), dot(edge1, cross(-minorDirDiff, v0ToRayOrigin)));
-
-        dWdAlpha =
-            vector2(-dot(edge0, cross(-majorDirDiff, v0ToRayOrigin)), -dot(edge0, cross(-minorDirDiff, v0ToRayOrigin)));
-
         return intersect_all_in;
     }
 };
@@ -163,8 +169,14 @@ struct IntersectTriangleThread {
     float denomCenter;
     float vCenter;
     float wCenter;
+    vector2 dDenomDAlpha;
+    vector2 dVdAlpha;
+    vector2 dWdAlpha;
 
-    CUDA_DEVICE IntersectTriangleThread(const IntersectTriangleTile& triTile, vector3 rayDirCenter) {
+    CUDA_DEVICE IntersectTriangleThread(const IntersectTriangleTile<false>& triTile,
+                                        vector3 rayDirCenter,
+                                        vector3 majorDirDiff,
+                                        vector3 minorDirDiff) {
         vector3 normal = cross(triTile.edge0, triTile.edge1);
         denomCenter = dot(-rayDirCenter, normal);
 
@@ -172,15 +184,17 @@ struct IntersectTriangleThread {
         vector3 eCenter = cross(-rayDirCenter, triTile.v0ToRayOrigin);
         vCenter = dot(triTile.edge1, eCenter);
         wCenter = -dot(triTile.edge0, eCenter);
+        GetDifferentials(triTile.edge0, triTile.edge1, triTile.v0ToRayOrigin, majorDirDiff, minorDirDiff, dDenomDAlpha,
+                         dVdAlpha, dWdAlpha);
     }
 
     // returns true if the ray intersects the triangle and the intersection distance is less than depth
     // also updates the value of depth
-    CUDA_DEVICE bool test(const IntersectTriangleTile& triTile, vector2 alpha, float& depth) {
+    CUDA_DEVICE bool test(const IntersectTriangleTile<false>& triTile, vector2 alpha, float& depth) {
         // it seems that the CUDA compiler is missing an opportunity to merge multiply + add across function calls into
         // FMA, so no call to dot product function here...
         // 2 FMA
-        float denom = denomCenter + triTile.dDenomDAlpha.x * alpha.x + triTile.dDenomDAlpha.y * alpha.y;
+        float denom = denomCenter + dDenomDAlpha.x * alpha.x + dDenomDAlpha.y * alpha.y;
 
         // t still needs to be divided by denom to get the correct distance
         // this is a combination of two tests:
@@ -197,9 +211,9 @@ struct IntersectTriangleThread {
 
         // compute scaled barycentrics
         // 2 FMA
-        float v = vCenter + triTile.dVdAlpha.x * alpha.x + triTile.dVdAlpha.y * alpha.y;
+        float v = vCenter + dVdAlpha.x * alpha.x + dVdAlpha.y * alpha.y;
         // 2 FMA
-        float w = wCenter + triTile.dWdAlpha.x * alpha.x + triTile.dWdAlpha.y * alpha.y;
+        float w = wCenter + dWdAlpha.x * alpha.x + dWdAlpha.y * alpha.y;
         // 2 ADD
         float u = denom - v - w;
 
@@ -217,12 +231,12 @@ struct IntersectTriangleThread {
         return true;
     }
 
-    CUDA_DEVICE void calcUVW(const IntersectTriangleTile& triTile, vector2 alpha, vector3& uvw) {
-        float denom = denomCenter + triTile.dDenomDAlpha.x * alpha.x + triTile.dDenomDAlpha.y * alpha.y;
+    CUDA_DEVICE void calcUVW(const IntersectTriangleTile<false>& triTile, vector2 alpha, vector3& uvw) {
+        float denom = denomCenter + dDenomDAlpha.x * alpha.x + dDenomDAlpha.y * alpha.y;
 
         // compute scaled barycentrics
-        float v = vCenter + triTile.dVdAlpha.x * alpha.x + triTile.dVdAlpha.y * alpha.y;
-        float w = wCenter + triTile.dWdAlpha.x * alpha.x + triTile.dWdAlpha.y * alpha.y;
+        float v = vCenter + dVdAlpha.x * alpha.x + dVdAlpha.y * alpha.y;
+        float w = wCenter + dWdAlpha.x * alpha.x + dWdAlpha.y * alpha.y;
         float u = denom - v - w;
 
         float denomInv = 1.0f / denom;
@@ -233,7 +247,8 @@ struct IntersectTriangleThread {
 };
 
 // tile-wide values
-struct IntersectTriangleTileDoF {
+template <>
+struct IntersectTriangleTile<true> {
     vector2 dDenomDAlpha;
 
     vector3 edge0;
@@ -281,14 +296,14 @@ struct IntersectTriangleTileDoF {
 struct IntersectTriangleThreadDoF {
     float denomCenter;
 
-    CUDA_DEVICE IntersectTriangleThreadDoF(const IntersectTriangleTileDoF& triTile, vector3 rayDirCenter) {
+    CUDA_DEVICE IntersectTriangleThreadDoF(const IntersectTriangleTile<true>& triTile, vector3 rayDirCenter) {
         vector3 normal = cross(triTile.edge0, triTile.edge1);
         denomCenter = dot(-rayDirCenter, normal);
     }
 
     // returns true if the ray intersects the triangle and the intersection distance is less than depth
     // also updates the value of depth
-    CUDA_DEVICE bool test(const IntersectTriangleTileDoF& triTile,
+    CUDA_DEVICE bool test(const IntersectTriangleTile<true>& triTile,
                           vector3 lensCenterToFocalCenter,
                           vector3 lensU,
                           vector3 lensV,
@@ -349,7 +364,7 @@ struct IntersectTriangleThreadDoF {
         return true;
     }
 
-    CUDA_DEVICE void calcUVW(const IntersectTriangleTileDoF& triTile,
+    CUDA_DEVICE void calcUVW(const IntersectTriangleTile<true>& triTile,
                              vector3 lensCenterToFocalCenter,
                              vector3 lensU,
                              vector3 lensV,

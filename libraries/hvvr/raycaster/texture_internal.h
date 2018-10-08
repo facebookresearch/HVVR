@@ -35,4 +35,6 @@ Texture2D createEmptyTexture(uint32_t width,
                              cudaTextureAddressMode yWrapMode,
                              bool linearFilter = true);
 
+void clearTexture(Texture2D tex);
+
 } // namespace hvvr

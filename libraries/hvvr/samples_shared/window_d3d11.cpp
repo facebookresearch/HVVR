@@ -219,7 +219,7 @@ void WindowD3D11::onResize() {
     initRenderTargets();
 
     if (_resizeCallback) {
-        _resizeCallback();
+        _resizeCallback(_width, _height);
     }
 }
 

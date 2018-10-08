@@ -47,7 +47,7 @@ struct ImageViewR8G8B8A8 {
     size_t stride = 0;
 };
 
-enum class PixelFormat { RGBA8_SRGB, RGBA32F };
+enum class PixelFormat { RGBA8_SRGB, RGBA16, RGBA32F };
 
 // A simple image resource handle: Does not own any memory.
 // Can wrap an arbitrary region in a 2-D buffer.
@@ -183,6 +183,11 @@ struct SimpleRay {
 struct SimpleRayFrustum {
     vector3 origins[4];
     vector3 directions[4];
+};
+
+struct Plane {
+    vector3 normal;
+    float dist;
 };
 
 // A precomputed triangle, optimized for intersection.

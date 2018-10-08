@@ -18,11 +18,9 @@
     <ClInclude Include="camera.h" />
     <ClInclude Include="cuda_util.h" />
     <ClInclude Include="frusta.h" />
-    <ClInclude Include="gbuffer.h" />
     <ClInclude Include="gpu_buffer.h" />
     <ClInclude Include="gpu_camera.h" />
     <ClInclude Include="gpu_context.h" />
-    <ClInclude Include="gpu_foveated.h" />
     <ClInclude Include="gpu_image.h" />
     <ClInclude Include="gpu_samples.h" />
     <ClInclude Include="gpu_scene_state.h" />
@@ -114,6 +112,7 @@
     <PlatformToolset>v140</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <UseDebugLibraries>false</UseDebugLibraries>
+    <CodeGenerationComputeVersionString>compute_60,sm_60</CodeGenerationComputeVersionString>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -128,11 +127,12 @@
   <ItemDefinitionGroup>
     <CudaCompile>
       <GenerateRelocatableDeviceCode>false</GenerateRelocatableDeviceCode>
-      <CodeGeneration>compute_61,sm_61</CodeGeneration>
+      <CodeGeneration>$(CodeGenerationComputeVersionString)</CodeGeneration>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <FastMath>true</FastMath>
       <GenerateLineInfo>true</GenerateLineInfo>
       <AdditionalOptions>-Xcompiler "/wd 4201 /wd 4127" %(AdditionalOptions)</AdditionalOptions>
+      <GPUDebugInfo Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</GPUDebugInfo>
     </CudaCompile>
   </ItemDefinitionGroup>
 </Project>

@@ -24,13 +24,13 @@ CUDA_DEVICE_INL int laneGetMaskLT() {
 
 template <typename T>
 CUDA_DEVICE_INL T laneBroadcast(T v, int laneIndex) {
-    return __shfl(v, laneIndex);
+    return __shfl_sync(__activemask(), v, laneIndex);
 }
 
 // avoid calling this multiple times for the same value of pred
 // the compiler doesn't like to optimize this intrinsic
 CUDA_DEVICE_INL int warpBallot(bool pred) {
-    return __ballot(pred);
+    return __ballot_sync(__activemask(), pred);
 }
 
 CUDA_DEVICE_INL int warpGetFirstActiveIndex(int predMask) {
@@ -69,6 +69,6 @@ CUDA_DEVICE_INL T warpAppend(bool pred, T* counter) {
 template <typename T, typename Op>
 CUDA_DEVICE_INL T warpReduce(T val, const Op& op) {
     for (int xorMask = WARP_SIZE / 2; xorMask >= 1; xorMask /= 2)
-        val = op(val, __shfl_xor(val, xorMask));
+        val = op(val, __shfl_xor_sync(__activemask(), val, xorMask));
     return val;
 }

@@ -11,10 +11,10 @@
 
 #include "dynamic_array.h"
 #include "graphics_types.h"
-
+#include <cassert>
 
 namespace hvvr {
-
+struct EccentricityMap;
 struct Sample {
     vector2ui pixelLocation;
     vector2 position;
@@ -29,6 +29,29 @@ struct Sample {
     } extents;
 };
 
+struct UnpackedSample {
+    vector2 center;
+    vector2 majorAxis;
+    vector2 minorAxis;
+};
+
+UnpackedSample unpackSample(Sample s);
+
+// Header for binary file of Samples
+struct SampleFileHeader {
+    uint32_t magic = 0x0CD1; // Oculus Distortion
+    uint32_t version = 0;
+    uint32_t reserved0;
+    uint32_t sampleCount;
+};
+
+// Save to file using a simple binary format
+void loadSamples(hvvr::DynamicArray<hvvr::Sample>& samples, const std::string& filename);
+
+// Load from file using a simple binary format
+void saveSamples(const std::vector<hvvr::Sample>& samples, const std::string& filename);
+
+
 struct SortedSample : Sample {
     uint32_t channel;
 
@@ -38,14 +61,14 @@ struct SortedSample : Sample {
 
 DynamicArray<Sample> getGridSamples(size_t width, size_t height);
 
-// -Z is along the axis of the eye
-struct DirectionSample {
-    vector3 direction;
-    vector3 zenithDifferential;
-    vector3 azimuthalDifferential;
+struct DirectionalBeam {
+	vector3 centerRay;
+	vector3 du;
+	vector3 dv;
 };
 
 /*
+
     Generate eye-space samples matching the eyes resolution with density using the linear model from
     https://www.microsoft.com/en-us/research/wp-content/uploads/2012/11/foveated_final15.pdf
 
@@ -67,36 +90,25 @@ struct DirectionSample {
     They use
     w_0 = 1/48 degrees (20/10 vision is 1/60 degrees)
 
-    \param ringStarts: The starting index for every concentric circle (along with the final sample count at the end).
-   Useful for ad-hoc meshing
-
     \param maxEyeTrackingUncertaintyDegrees If set to > 0 then e acts like max(e - maxEyeTrackingUncertaintyDegrees, 0).
    This ensures that we conservatively calculate the sampling positions so that we don't accidentally undersample
    regions of the screen due to error in eye tracking. The higher this value, the more samples are generated.
-    \param minMAR We do not generate samples for regions of the distribution with lower calculated MAR than minMAR.
-   Useful if you want to render the region of the screen you can fully resolve with an exact technique instead of
-   reconstructing from these foveated samples
-   \param maxMAR We do not space samples any further away than the maxMAR in degrees
     \param maxFOVDegrees is the diagonal FOV of the display, we generate samples such that even if you are looking in
    the far corner of the display, there is one ring of samples beyond the opposite corner of the display, so that the
    entire screen can still be reconstructed from the foveate samples without issue.
     \param marSlope corresponds to m, we default it to the more conservative m_B
     \param fovealMARDegrees corresponds to w_0, we default it to 1/60 degrees (20/10) to be even more conservative than
    the microsoft paper
-   \param zenithJitterStrength How much to jitter each sample along the zenith direction
-   \param ringJitterStrength How much to jitter each ring along the azimuthal direction
-   (TODO: support to jitter samples individually along the azimuthal direction)
+
+   Consider replacing this space with a transformed log-polar coordinate system:
+   Weiman, Chaikin, Logarithmic Spiral Grids for Image Processing and Display, Computer Graphics and Image Processing
+   11, 197–226 (1979).
 */
-// Use the model from getEyeSpaceFoveatedSamples, but require identical number of samples around each annulus
-DynamicArray<DirectionSample> getEyeSpacePolarFoveatedSamples(std::vector<float>& ringEccentricities,
-                                                                    size_t& samplesPerRing,
-                                                                    float maxEyeTrackingUncertaintyDegrees,
-                                                                    float minMAR,
-                                                                    float maxMAR,
-                                                                    float maxFOVDegrees,
-                                                                    float marSlope,
-                                                                    float fovealMARDegrees,
-                                                                    float zenithJitterStrength,
-                                                                    float ringJitterStrength);
+DynamicArray<DirectionalBeam> getEyeSpacePolarFoveatedSamples(size_t& samplesPerRing,
+                                                              EccentricityMap& emap,
+                                                              float maxEyeTrackingUncertaintyDegrees,
+                                                              float maxFOVDegrees,
+                                                              float marSlope,
+                                                              float fovealMARDegrees);
 
 } // namespace hvvr

@@ -14,8 +14,8 @@
 namespace hvvr {
 
 enum class ShadingModel : uint32_t {
-	none = 0,
-	phong,
+    none = 0,
+    phong,
     emissive,
 };
 
@@ -40,12 +40,13 @@ struct SimpleMaterial {
     }
 
     vector4 emissive;
-	vector4 diffuse;
-	vector4 specular;
-	float glossiness;
-	float opacity;
-	// upper 16 bits diffuse/emissive | next 16 bits specularTexture | next 16 bits glossinessTexture | lower 16 bits shadingModel
-	uint64_t textureIDsAndShadingModel;
+    vector4 diffuse;
+    vector4 specular;
+    float glossiness;
+    float opacity;
+    // upper 16 bits diffuse/emissive | next 16 bits specularTexture | next 16 bits glossinessTexture | lower 16 bits
+    // shadingModel
+    uint64_t textureIDsAndShadingModel;
 };
 
 } // namespace hvvr

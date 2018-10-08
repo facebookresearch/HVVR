@@ -46,8 +46,8 @@ CUDA_HOST_DEVICE_INL vector2 tapLocation(int subsampleIndex, float spinAngle, fl
 
 template <uint32_t MSAARate>
 CUDA_HOST_DEVICE_INL vector2 getSubsampleUnitOffset(vector2 sampleJitter,
-                                                   int subsampleIndex,
-                                                   float extraSpinAngle = 0.0f) {
+                                                    int subsampleIndex,
+                                                    float extraSpinAngle = 0.0f) {
     (void)sampleJitter;
     float spinAngle = extraSpinAngle;
 #if JITTER_SAMPLES
@@ -61,24 +61,19 @@ CUDA_HOST_DEVICE_INL vector2 getSubsampleUnitOffset(vector2 sampleJitter,
     return vector2(unitDiskLoc.x * radius, unitDiskLoc.y * radius);
 }
 
-struct SampleInfo {
-    vector2* centers;
-    Sample::Extents* extents;
+CHDI DirectionalBeam operator*(matrix3x3 M, DirectionalBeam beam) {
+    DirectionalBeam mBeam;
+    mBeam.centerRay = M * beam.centerRay;
+    mBeam.du = M * beam.du;
+    mBeam.dv = M * beam.dv;
+    return mBeam;
+}
+
+struct CameraBeams {
+    DirectionalBeam* directionalBeams;
     vector2 frameJitter;
     ThinLens lens;
-    SampleInfo(const GPUCamera& camera);
-};
-
-struct UnpackedSample {
-    vector2 center;
-    vector2 majorAxis;
-    vector2 minorAxis;
-};
-
-struct UnpackedDirectionalSample {
-    vector3 centerDir;
-    vector3 majorDirDiff;
-    vector3 minorDirDiff;
+    CameraBeams(const GPUCamera& camera);
 };
 
 struct SampleDoF {
@@ -86,84 +81,10 @@ struct SampleDoF {
     vector3 dir;
 };
 
-// sqrt(2)/2, currently a hack so that the ellipses blobs of diagonally adjacent pixels on a uniform grid are tangent
-#define EXTENT_MODIFIER 0.70710678118f
-
-CUDA_DEVICE_INL UnpackedSample GetFullSample(uint32_t sampleIndex, SampleInfo sampleInfo) {
-    UnpackedSample sample;
-    sample.center = sampleInfo.centers[sampleIndex];
-
-    Sample::Extents extents = sampleInfo.extents[sampleIndex];
-    sample.minorAxis.x = extents.minorAxis.x * EXTENT_MODIFIER;
-    sample.minorAxis.y = extents.minorAxis.y * EXTENT_MODIFIER;
-
-    // 90 degree Rotation, and rescale
-    float minorAxisLengthInv =
-        rsqrtf(sample.minorAxis.x * sample.minorAxis.x + sample.minorAxis.y * sample.minorAxis.y);
-    float rescale = extents.majorAxisLength * EXTENT_MODIFIER * minorAxisLengthInv;
-    sample.majorAxis.x = -sample.minorAxis.y * rescale;
-    sample.majorAxis.y = sample.minorAxis.x * rescale;
-
-    return sample;
-}
-
-CUDA_DEVICE_INL UnpackedDirectionalSample GetDirectionalSample3D(uint32_t sampleIndex,
-                                                                 SampleInfo sampleInfo,
-                                                                 matrix4x4 sampleToWorld,
-                                                                 matrix3x3 sampleToCamera,
-                                                                 matrix4x4 cameraToWorld) {
-    UnpackedSample sample = GetFullSample(sampleIndex, sampleInfo);
-
-#if ENABLE_HACKY_WIDE_FOV
-    matrix3x3 cameraToWorldRotation = matrix3x3(cameraToWorld);
-
-    UnpackedDirectionalSample sample3D;
-
-    float u = sample.center.x;
-    float v = sample.center.y;
-
-    float yaw = (u - .5f) * (HACKY_WIDE_FOV_W * RadiansPerDegree);
-    float pitch = -(v - .5f) * (HACKY_WIDE_FOV_H * RadiansPerDegree);
-
-    float newX = sin(yaw) * cos(pitch);
-    float newY = sin(pitch);
-    float newZ = -cos(yaw) * cos(pitch);
-    sample3D.centerDir = vector3(newX, newY, newZ);
-
-    // making something up...
-    const float invWidth = 1.0f / 2160.0f;
-    const float invHeight = 1.0f / 1200.0f;
-    float majorAxisMag = sin(.5f * invHeight * (HACKY_WIDE_FOV_H * RadiansPerDegree));
-    float minorAxisMag = sin(.5f * invWidth * (HACKY_WIDE_FOV_W * RadiansPerDegree));
-
-    sample3D.majorDirDiff.x = sin(yaw) * sin(pitch);
-    sample3D.majorDirDiff.y = -cos(pitch);
-    sample3D.majorDirDiff.z = -cos(yaw) * sin(pitch);
-
-    sample3D.minorDirDiff = cross(sample3D.majorDirDiff, sample3D.centerDir);
-
-    sample3D.majorDirDiff *= majorAxisMag;
-    sample3D.minorDirDiff *= minorAxisMag;
-
-    if (HACKY_WIDE_FOV_H > HACKY_WIDE_FOV_W) {
-        vector3 temp = sample3D.minorDirDiff;
-        sample3D.minorDirDiff = sample3D.majorDirDiff;
-        sample3D.majorDirDiff = temp;
-    }
-
-    sample3D.centerDir = cameraToWorldRotation * sample3D.centerDir;
-    sample3D.majorDirDiff = cameraToWorldRotation * sample3D.majorDirDiff;
-    sample3D.minorDirDiff = cameraToWorldRotation * sample3D.minorDirDiff;
-#else
-    matrix3x3 sampleToWorldRotation(sampleToWorld);
-
-    UnpackedDirectionalSample sample3D;
-    sample3D.centerDir = sampleToWorldRotation * vector3(sample.center.x, sample.center.y, 1.0f);
-    sample3D.majorDirDiff = sampleToWorldRotation * vector3(sample.majorAxis.x, sample.majorAxis.y, 0.0f);
-    sample3D.minorDirDiff = sampleToWorldRotation * vector3(sample.minorAxis.x, sample.minorAxis.y, 0.0f);
-#endif
-
-    return sample3D;
+CUDA_DEVICE_INL DirectionalBeam GetDirectionalSample3D(uint32_t sampleIndex,
+                                                       CameraBeams cameraBeams,
+                                                       matrix4x4 cameraToWorld) {
+    return matrix3x3(cameraToWorld) * cameraBeams.directionalBeams[sampleIndex];
 }
 
 template <uint32_t MSAARate, uint32_t BlockSize>

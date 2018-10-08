@@ -17,18 +17,19 @@ CUDA_DEVICE_INL uint32_t FloatFlip(uint32_t f) {
     return f ^ mask;
 }
 CUDA_DEVICE_INL uint32_t IFloatFlip(uint32_t f) {
-    uint32_t mask = ((f >> 31) - 1) | 0x80000000;
+    // TODO: CUDA 8.0 -> 9.1 transition... PTX is OK (unchanged), SASS is busted
+    //uint32_t mask = ((f >> 31) - 1) | 0x80000000;
+
+    // this seems to work on 9.1
+    uint32_t mask = ((f & 0x80000000) == 0) ? 0xffffffff : 0x80000000;
+
     return f ^ mask;
 }
 CUDA_DEVICE_INL uint32_t FloatFlipF(float f) {
-    int fAsInt = __float_as_int(f);
-    uint32_t fAsUInt = *((uint32_t*)&f);
-    return FloatFlip(fAsUInt);
+    return FloatFlip(__float_as_int(f));
 }
 CUDA_DEVICE_INL float IFloatFlipF(uint32_t f) {
-    uint32_t resU = IFloatFlip(f);
-    int32_t resI = *((uint32_t*)&f);
-    return __int_as_float(resI);
+    return __int_as_float(IFloatFlip(f));
 }
 
 // bitonic sort within a single thread, see:

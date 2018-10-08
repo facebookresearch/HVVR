@@ -151,7 +151,6 @@ void Raycaster::uploadScene() {
     // if we update CUDA's copy of the scene, we must also call AnimateScene to supply the transforms
     gpuSceneState.setGeometry(*this);
 
-    // TODO(anankervis): don't dynamically allocate memory here
     DynamicArray<matrix4x4> modelToWorld(_models.size());
     for (size_t i = 0; i < _models.size(); ++i)
         modelToWorld[i] = matrix4x4(_models[i]->getTransform());

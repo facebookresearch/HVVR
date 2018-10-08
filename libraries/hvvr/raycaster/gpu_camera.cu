@@ -14,18 +14,10 @@
 #include "kernel_constants.h"
 #include "magic_constants.h"
 #include "memory_helpers.h"
-
+#include <cuda_d3d11_interop.h>
+#include <cuda_gl_interop.h>
 #include <functional>
 #include <random>
-
-#ifdef DX_SUPPORTED
-#include <cuda_d3d11_interop.h>
-#else
-struct ID3D11Texture2D;
-struct ID3D11Buffer;
-#endif
-
-#include <cuda_gl_interop.h>
 
 
 namespace hvvr {
@@ -34,6 +26,8 @@ uint32_t pixelFormatSize(PixelFormat pixelFormat) {
     switch (pixelFormat) {
         case PixelFormat::RGBA8_SRGB:
             return 4;
+        case PixelFormat::RGBA16:
+            return 8;
         case PixelFormat::RGBA32F:
             return 16;
         default:
@@ -66,7 +60,8 @@ GPUCamera::GPUCamera(const Camera* cameraPtr) : streamedIndexCPU(0), streamedInd
 void GPUCamera::initLookupTables(int _MSAARate) {
     // getSubsampleUnitOffset needs a compile-time constant for MSAARate
     enum { MSAARate = COLOR_MODE_MSAA_RATE };
-    assert(MSAARate == _MSAARate);
+    if (MSAARate != _MSAARate)
+        fail("MSAARate for lookup table must match compile-time constant\n");
 
     std::uniform_real_distribution<float> uniformRandomDist(0.0f, 1.0f);
     std::mt19937 generator;
@@ -132,28 +127,23 @@ void GPUCamera::streamedDataGpuDone() {
 }
 
 void GPUCamera::setCameraJitter(vector2 jitter) {
-    frameJitter.x = jitter.x;
-    frameJitter.y = jitter.y;
+    frameJitter = jitter;
 }
 
-void GPUCamera::updatePerFrame(vector3 cameraPos,
-                               vector3 cameraLookVector,
-                               const matrix3x3& _sampleToCamera,
-                               const matrix4x4& _cameraToWorld) {
-    position = vector3(cameraPos.x, cameraPos.y, cameraPos.z);
-    lookVector = vector3(cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
-    sampleToCamera = _sampleToCamera;
+void GPUCamera::updateTransform(const matrix4x4& _cameraToWorld) {
     cameraToWorld = _cameraToWorld;
 }
 
-static int getMSAARate(RaycasterOutputMode outputMode) {
-    return (outputMode == RaycasterOutputMode::COLOR_RGBA8) ? COLOR_MODE_MSAA_RATE : 1;
+static int getMSAARate(RaycasterOutputFormat outputMode) {
+    return (outputMode == RaycasterOutputFormat::COLOR_RGBA8) ? COLOR_MODE_MSAA_RATE : 1;
 }
 
 static TextureFormat pixelFormatToTextureFormat(PixelFormat format) {
     switch (format) {
         case PixelFormat::RGBA8_SRGB:
             return TextureFormat::r8g8b8a8_unorm_srgb;
+        case PixelFormat::RGBA16:
+            return TextureFormat::r16g16b16a16_unorm;
         case PixelFormat::RGBA32F:
             return TextureFormat::r32g32b32a32_float;
         default:
@@ -163,10 +153,9 @@ static TextureFormat pixelFormatToTextureFormat(PixelFormat format) {
 }
 
 // TODO(anankervis): merge the different functions that duplicate camera resource creation
-void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
+void GPUCamera::updateConfig(RaycasterOutputFormat _outputMode,
                              int32_t* sampleRemap,
-                             float* sampleLocations,
-                             Sample::Extents* sampleExtents,
+                             DirectionalBeam* directionalSamples,
                              ThinLens _lens,
                              uint32_t _sampleCount,
                              uint32_t imageWidth,
@@ -180,9 +169,7 @@ void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
     validSampleCount = imageWidth * imageHeight * splitColorSamples;
     d_sampleRemap = GPUBuffer<int32_t>(sampleRemap, sampleRemap + validSampleCount);
     sampleCount = _sampleCount;
-    d_sampleLocations = GPUBuffer<vector2>((vector2*)sampleLocations, (vector2*)(sampleLocations) + sampleCount);
-    d_sampleExtents =
-        GPUBuffer<Sample::Extents>((Sample::Extents*)sampleExtents, (Sample::Extents*)(sampleExtents) + sampleCount);
+    d_directionalBeams = GPUBuffer<DirectionalBeam>(directionalSamples, directionalSamples + sampleCount);
 
     outputMode = _outputMode;
     int msaaRate = getMSAARate(outputMode);
@@ -191,17 +178,16 @@ void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
     PixelFormat outputFormat = outputModeToPixelFormat(outputMode);
     TextureFormat textureFormat = pixelFormatToTextureFormat(outputFormat);
 
-    previousResultTexture =
-        createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
-    resultTexture =
-        createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
+    auto createImageSizedTexture = [&]() {
+        return createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
+    };
 
+    previousResultTexture = createImageSizedTexture();
+    resultTexture = createImageSizedTexture();
     contrastEnhancementSettings.enable = true;
-    contrastEnhancementSettings.f_e = 0.2f;
-    contrastEnhancementBuffers.horizontallyFiltered =
-        createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
-    contrastEnhancementBuffers.fullyFiltered =
-        createEmptyTexture(imageWidth, imageHeight, textureFormat, cudaAddressModeClamp, cudaAddressModeClamp);
+    contrastEnhancementSettings.f_e = 1.0f;
+    contrastEnhancementBuffers.horizontallyFiltered = createImageSizedTexture();
+    contrastEnhancementBuffers.fullyFiltered = createImageSizedTexture();
 
     auto pixelFormat = outputModeToPixelFormat(outputMode);
     d_sampleResults =
@@ -214,24 +200,19 @@ void GPUCamera::updateConfig(RaycasterOutputMode _outputMode,
 
 void GPUCamera::registerPolarFoveatedSamples(const std::vector<vector2ui>& polarRemapToPixel,
                                              float _maxEccentricityRadians,
-                                             const std::vector<float>& ringEccentricities,
-                                             const std::vector<float>& eccentricityCoordinateMap,
+                                             const EccentricityMap& eMap,
                                              uint32_t samplesPerRing,
                                              uint32_t paddedSampleCount) {
     PixelFormat outputFormat = outputModeToPixelFormat(outputMode);
     sampleCount = paddedSampleCount;
     d_sampleResults = GPUBuffer<uint32_t>((paddedSampleCount * pixelFormatSize(outputFormat) + sizeof(uint32_t) - 1) /
                                           sizeof(uint32_t));
-    d_sampleLocations = GPUBuffer<vector2>(paddedSampleCount);
-    d_sampleExtents = GPUBuffer<Sample::Extents>(paddedSampleCount);
     d_sampleRemap = GPUBuffer<int32_t>(paddedSampleCount);
 
     // For temporal filtering
     d_tMaxBuffer = GPUBuffer<float>(paddedSampleCount);
-
+    eccentricityMap = eMap;
     maxEccentricityRadians = _maxEccentricityRadians;
-    d_eccentricityCoordinateMap = makeGPUBuffer(eccentricityCoordinateMap);
-    d_ringEccentricities = makeGPUBuffer(ringEccentricities);
 
     int msaaRate = getMSAARate(outputMode);
     size_t totalSubsampleCount = paddedSampleCount * msaaRate;
@@ -243,15 +224,15 @@ void GPUCamera::registerPolarFoveatedSamples(const std::vector<vector2ui>& polar
 
     TextureFormat textureFormat = pixelFormatToTextureFormat(outputFormat);
 
-    polarFoveatedImage = createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
-                                            textureFormat, cudaAddressModeWrap, cudaAddressModeClamp);
-    previousPolarFoveatedImage = createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
-                                                    textureFormat, cudaAddressModeWrap, cudaAddressModeClamp);
-    rawPolarFoveatedImage = createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
-                                               textureFormat, cudaAddressModeWrap, cudaAddressModeClamp, false);
-    polarFoveatedDepthImage =
-        createEmptyTexture(samplesPerRing, uint32_t(polarRemapToPixel.size() / samplesPerRing),
-                           TextureFormat::r32_float, cudaAddressModeWrap, cudaAddressModeClamp, false);
+    uint32_t ringCount = uint32_t(polarRemapToPixel.size() / samplesPerRing);
+    auto createFoveatedImage = [&](TextureFormat format, bool linearFilter = true) {
+        return createEmptyTexture(samplesPerRing, ringCount, format, cudaAddressModeWrap, cudaAddressModeClamp,
+                                  linearFilter);
+    };
+    polarTextures.raw = createFoveatedImage(textureFormat);
+    polarTextures.depth = createFoveatedImage(TextureFormat::r32_float, false);
+    polarTextures.moment1 = createFoveatedImage(TextureFormat::r16g16b16a16_unorm);
+    polarTextures.moment2 = createFoveatedImage(TextureFormat::r16g16b16a16_unorm);
 
     initLookupTables(msaaRate);
 }
@@ -262,14 +243,15 @@ bool GPUCamera::bindTexture(GPUContext& gpuContext, ImageResourceDescriptor text
         cutilSafeCall(cudaGraphicsUnregisterResource(resultsResource));
         resultsResource = nullptr;
     }
-#ifdef DX_SUPPORTED
     if (texture.memoryType == ImageResourceDescriptor::MemoryType::DX_TEXTURE) {
+#if defined(_WIN32)
         // cudaGraphicsRegisterFlagsNone is only valid flag as of 7/22/2016
         cutilSafeCall(cudaGraphicsD3D11RegisterResource(&resultsResource, (ID3D11Texture2D*)texture.data,
                                                         cudaGraphicsRegisterFlagsNone));
-    }
+#else
+        assert(false, "Cannot do DirectX interop on non-windows platforms");
 #endif
-    if (texture.memoryType == ImageResourceDescriptor::MemoryType::OPENGL_TEXTURE) {
+    } else if (texture.memoryType == ImageResourceDescriptor::MemoryType::OPENGL_TEXTURE) {
         cutilSafeCall(cudaGraphicsGLRegisterImage(&resultsResource, (GLuint)(uint64_t)texture.data, GL_TEXTURE_2D,
                                                   cudaGraphicsMapFlagsWriteDiscard));
     }
@@ -296,7 +278,7 @@ void GPUCamera::copyImageToCPU(uint32_t* imageData, uint32_t imageWidth, uint32_
 void GPUCamera::acquireTileCullData(SimpleRayFrustum* tileFrusta, SimpleRayFrustum* blockFrusta) {
     cutilSafeCall(cudaEventSynchronize(transferTileToCPUEvent));
 
-    size_t blockCount = d_cullBlockFrusta.size();
+    size_t blockCount = d_foveatedWorldSpaceBlockFrusta.size();
     memcpy(blockFrusta, foveatedWorldSpaceBlockFrustaPinned, sizeof(SimpleRayFrustum) * blockCount);
     memcpy(tileFrusta, foveatedWorldSpaceTileFrustaPinned, sizeof(SimpleRayFrustum) * blockCount * TILES_PER_BLOCK);
 }
@@ -316,10 +298,10 @@ void GPUCamera::intersectShadeResolve(GPUSceneState& sceneState) {
         clearEmpty();
     }
 
-    SampleInfo sampleInfo(*this);
+    CameraBeams cameraBeams(*this);
     if (streamedData.tileCountOccupied > 0) {
-        intersect(sceneState, sampleInfo);
-        shadeAndResolve(sceneState, sampleInfo);
+        intersect(sceneState, cameraBeams);
+        shadeAndResolve(sceneState, cameraBeams);
     }
 
     streamedDataGpuDone();

@@ -17,29 +17,21 @@
 
 namespace hvvr {
 
-void ComputeEyeSpaceFrusta(const GPUBuffer<PrecomputedDirectionSample>& dirSamples,
+// For conveniently passing four planes by value to the world space transformation kernel.
+struct FourPlanes {
+    Plane data[4];
+};
+
+void ComputeEyeSpaceFrusta(const GPUBuffer<DirectionalBeam>& dirSamples,
                            GPUBuffer<SimpleRayFrustum>& tileFrusta,
                            GPUBuffer<SimpleRayFrustum>& blockFrusta);
-
-void ResetCullFrusta(GPURayPacketFrustum* d_blockFrusta,
-                     GPURayPacketFrustum* d_tileFrusta,
-                     const uint32_t tileCount,
-                     const uint32_t blockCount,
-                     cudaStream_t stream);
-
-void CalculateSampleCullFrusta(GPURayPacketFrustum* d_blockFrusta,
-                               GPURayPacketFrustum* d_tileFrusta,
-                               SampleInfo sampleInfo,
-                               const uint32_t sampleCount,
-                               const uint32_t tileCount,
-                               const uint32_t blockCount,
-                               cudaStream_t stream);
 
 void CalculateWorldSpaceFrusta(SimpleRayFrustum* blockFrustaWS,
                                SimpleRayFrustum* tileFrustaWS,
                                SimpleRayFrustum* blockFrustaES,
                                SimpleRayFrustum* tileFrustaES,
                                matrix4x4 eyeToWorldMatrix,
+                               FourPlanes cullPlanes,
                                uint32_t blockCount,
                                uint32_t tileCount,
                                cudaStream_t stream);

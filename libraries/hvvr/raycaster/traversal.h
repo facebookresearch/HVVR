@@ -10,12 +10,12 @@
  */
 
 #include "bvh_node.h"
+#include "dynamic_array.h"
 #include "graphics_types.h"
 #include "magic_constants.h"
 #include "raycaster_common.h"
 #include "samples.h"
 #include "vector_math.h"
-#include "dynamic_array.h"
 
 #include <assert.h>
 
@@ -85,6 +85,9 @@ struct RayPacketFrustum2D {
 // -where p are the vertices of a polyhedron
 // -then p[k] is outside the plane
 // -if all p are outside any single plane, then the polyhedron is rejected
+//
+// We allow for specifying a fully-culling degerenated frustum by using -infinite-b
+// (If the b[i] are -inifinity, then the frustum rejects all intersection tests.)
 struct RayPacketFrustum3D {
     // no near or far plane
     enum { planeCount = 4 };
@@ -177,11 +180,10 @@ struct RayPacketFrustum3D {
     // --as opposed to recomputing all the cross products and such, use transpose of inverse for normals/planes
     RayPacketFrustum3D transform(const matrix4x4& m, const matrix4x4& mInvTranspose) const {
         (void)mInvTranspose;
-        return RayPacketFrustum3D(
-            vector3(m * vector4(pointOrigin[0], 1.0f)), matrix3x3(m) * pointDir[0],
-            vector3(m * vector4(pointOrigin[1], 1.0f)), matrix3x3(m) * pointDir[1],
-            vector3(m * vector4(pointOrigin[2], 1.0f)), matrix3x3(m) * pointDir[2],
-            vector3(m * vector4(pointOrigin[3], 1.0f)), matrix3x3(m) * pointDir[3]);
+        return RayPacketFrustum3D(vector3(m * vector4(pointOrigin[0], 1.0f)), matrix3x3(m) * pointDir[0],
+                                  vector3(m * vector4(pointOrigin[1], 1.0f)), matrix3x3(m) * pointDir[1],
+                                  vector3(m * vector4(pointOrigin[2], 1.0f)), matrix3x3(m) * pointDir[2],
+                                  vector3(m * vector4(pointOrigin[3], 1.0f)), matrix3x3(m) * pointDir[3]);
     }
 
     // intersect against the four child AABBs, corresponding bit index is set if the AABB passes
@@ -202,7 +204,7 @@ struct RayPacketFrustum3D {
     }
 };
 
-struct BlockInfo {
+struct RayHierarchy {
     ArrayView<const RayPacketFrustum3D> blockFrusta;
     ArrayView<const RayPacketFrustum3D> tileFrusta;
 };

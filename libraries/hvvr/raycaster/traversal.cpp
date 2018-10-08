@@ -29,14 +29,22 @@ namespace hvvr {
 // TODO(anankervis): optimize this - it gets called a lot
 // find the major axis, and precompute some values for the intersection tests
 void RayPacketFrustum3D::updatePrecomputed() {
-    plane[0] = vector4(cross(pointDir[0], pointDir[1]), 0.0f);
-    plane[1] = vector4(cross(pointDir[1], pointDir[2]), 0.0f);
-    plane[2] = vector4(cross(pointDir[2], pointDir[3]), 0.0f);
-    plane[3] = vector4(cross(pointDir[3], pointDir[0]), 0.0f);
-    plane[0].w = dot(pointOrigin[0], vector3(plane[0]));
-    plane[1].w = dot(pointOrigin[1], vector3(plane[1]));
-    plane[2].w = dot(pointOrigin[2], vector3(plane[2]));
-    plane[3].w = dot(pointOrigin[3], vector3(plane[3]));
+    // If we have an infinite orgin, assume a fully degenerate frustum that encompasses nothing.
+    if (isinf(pointOrigin[0].x)) {
+        plane[0] = vector4(0, 0, 0, -INFINITY);
+        plane[1] = vector4(0, 0, 0, -INFINITY);
+        plane[2] = vector4(0, 0, 0, -INFINITY);
+        plane[3] = vector4(0, 0, 0, -INFINITY);
+    } else {
+        plane[0] = vector4(cross(pointDir[0], pointDir[1]), 0.0f);
+        plane[1] = vector4(cross(pointDir[1], pointDir[2]), 0.0f);
+        plane[2] = vector4(cross(pointDir[2], pointDir[3]), 0.0f);
+        plane[3] = vector4(cross(pointDir[3], pointDir[0]), 0.0f);
+        plane[0].w = dot(pointOrigin[0], vector3(plane[0]));
+        plane[1].w = dot(pointOrigin[1], vector3(plane[1]));
+        plane[2].w = dot(pointOrigin[2], vector3(plane[2]));
+        plane[3].w = dot(pointOrigin[3], vector3(plane[3]));
+    }
 
     vector3 avgDir = pointDir[0] + pointDir[1] + pointDir[2] + pointDir[3];
     if (fabsf(avgDir.x) > fabsf(avgDir.y)) {
@@ -417,6 +425,9 @@ void StackFrameBlock::sort(uint32_t stackSize) {
 static __forceinline uint32_t blockCull3D(StackFrameBlock* frame,
                                           const BVHNode* node,
                                           const RayPacketFrustum3D& frustum) {
+    if (frustum.plane[0].w == -std::numeric_limits<float>::infinity()) {
+        return 0;
+    }
     auto negateMask = m256(-0.0f);
     uint32_t top = 0;
     auto tMin = 0.0f;
@@ -512,6 +523,10 @@ static __forceinline uint32_t tileCull3D(uint32_t* triIndices,
                                          StackFrameTile* frame,
                                          uint32_t top,
                                          const RayPacketFrustum3D& frustum) {
+    (void)maxTriCount;
+    if (frustum.plane[0].w == -std::numeric_limits<float>::infinity()) {
+        return 0;
+    }
     auto negateMask = m256(-0.0f);
     auto tMin = 0.0f;
     uint32_t triCount = 0;
@@ -680,8 +695,11 @@ struct TaskData {
     }
 };
 
-static void cullThread(
-    const BlockInfo& blockInfo, uint32_t startBlock, uint32_t endBlock, const BVHNode* nodes, TaskData* perThread) {
+static void cullThread(const RayHierarchy& rayHierarchy,
+                       uint32_t startBlock,
+                       uint32_t endBlock,
+                       const BVHNode* nodes,
+                       TaskData* perThread) {
 #if DEBUG_STATS
     auto startTime = (double)__rdtsc();
 #endif
@@ -694,7 +712,7 @@ static void cullThread(
 
     StackFrameBlock frameBlock;
     for (uint32_t b = startBlock; b < endBlock; ++b) {
-        const RayPacketFrustum3D& blockFrustum = blockInfo.blockFrusta[b];
+        const RayPacketFrustum3D& blockFrustum = rayHierarchy.blockFrusta[b];
         uint32_t stackSize = blockCull3D(&frameBlock, nodes, blockFrustum);
 
         if (!stackSize) { // we hit nothing?
@@ -719,7 +737,7 @@ static void cullThread(
             uint32_t* triIndices = perThread->triIndices.data() + perThread->triIndexCount;
             uint32_t maxTriCount = uint32_t(perThread->triIndices.size()) - perThread->triIndexCount;
 
-            const RayPacketFrustum3D& tileFrustum = blockInfo.tileFrusta[globalTileIndex];
+            const RayPacketFrustum3D& tileFrustum = rayHierarchy.tileFrusta[globalTileIndex];
             uint32_t outputTriCount = tileCull3D(triIndices, maxTriCount, &frameTile, stackSize, tileFrustum);
 
             if (outputTriCount) {
@@ -741,9 +759,9 @@ static void cullThread(
     std::vector<double> blockFrustaAngle(endBlock - startBlock);
     std::vector<double> tileFrustaAngle((endBlock - startBlock) * TILES_PER_BLOCK);
     for (size_t b = startBlock; b < endBlock; ++b) {
-        blockFrustaAngle[b - startBlock] = solidAngle(blockInfo.blockFrusta[b]);
+        blockFrustaAngle[b - startBlock] = solidAngle(rayHierarchy.blockFrusta[b]);
         for (size_t t = 0; t < TILES_PER_BLOCK; ++t) {
-            tileFrustaAngle[t] = solidAngle(blockInfo.tileFrusta[b * TILES_PER_BLOCK + t]);
+            tileFrustaAngle[t] = solidAngle(rayHierarchy.tileFrusta[b * TILES_PER_BLOCK + t]);
         }
     }
     size_t validBlocks, validTiles;
@@ -757,24 +775,24 @@ static void cullThread(
 #endif
 }
 
-void Raycaster::buildTileTriangleLists(const BlockInfo& blockInfo, Camera_StreamedData* streamed) {
+void Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed) {
     const BVHNode* nodes = _nodes.data();
     ArrayView<uint32_t> triIndices(streamed->triIndices.dataHost(), streamed->triIndices.size());
 
 #if DEBUG_STATS
-    std::vector<double> blockFrustaAngle(blockInfo.blockFrusta.size());
-    for (int i = 0; i < blockInfo.blockFrusta.size(); ++i) {
-        blockFrustaAngle[i] = solidAngle(blockInfo.blockFrusta[i]);
+    std::vector<double> blockFrustaAngle(rayHierarchy.blockFrusta.size());
+    for (int i = 0; i < rayHierarchy.blockFrusta.size(); ++i) {
+        blockFrustaAngle[i] = solidAngle(rayHierarchy.blockFrusta[i]);
     }
     size_t validBlocks;
     vector4 m4X = minMaxMeanMedian(blockFrustaAngle, validBlocks);
     printf("Block: Min,Max,Mean,Median: %g, %g, %g, %g\n", m4X.x, m4X.y, m4X.z, m4X.w);
     printf("Percent of sphere covered by block frusta: %g\n", 100.0 * m4X.z * validBlocks / (4 * M_PI));
 
-    std::vector<double> tileFrustaAngle(blockInfo.tileFrusta.size());
-    for (int i = 0; i < blockInfo.tileFrusta.size(); ++i) {
+    std::vector<double> tileFrustaAngle(rayHierarchy.tileFrusta.size());
+    for (int i = 0; i < rayHierarchy.tileFrusta.size(); ++i) {
         // Convert to square degrees from steradians
-        tileFrustaAngle[i] = solidAngle(blockInfo.tileFrusta[i]);
+        tileFrustaAngle[i] = solidAngle(rayHierarchy.tileFrusta[i]);
     }
     size_t validTiles;
     m4X = minMaxMeanMedian(tileFrustaAngle, validTiles);
@@ -792,7 +810,7 @@ void Raycaster::buildTileTriangleLists(const BlockInfo& blockInfo, Camera_Stream
     // 2 seems the fastest (though this could vary depending on the scene and sample distribution)
     // 3+ seems to become less efficient due to workload balancing
     enum { blocksPerThread = 2 };
-    uint32_t blockCount = uint32_t(blockInfo.blockFrusta.size());
+    uint32_t blockCount = uint32_t(rayHierarchy.blockFrusta.size());
     uint32_t numTasks = (blockCount + blocksPerThread - 1) / blocksPerThread;
     assert(numTasks <= maxTasks);
     numTasks = min<uint32_t>(maxTasks, numTasks);
@@ -811,8 +829,7 @@ void Raycaster::buildTileTriangleLists(const BlockInfo& blockInfo, Camera_Stream
         if (i == numTasks - 1)
             assert(endBlock == blockCount);
 
-        taskResults[i] = _threadPool->addTask(cullThread, blockInfo, startBlock, endBlock,
-                                              nodes, &taskData[i]);
+        taskResults[i] = _threadPool->addTask(cullThread, rayHierarchy, startBlock, endBlock, nodes, &taskData[i]);
     }
 
 #if DEBUG_STATS

@@ -25,6 +25,7 @@ void Raycaster::cleanupScene() {
     DestroyAllTextures();
 }
 
+
 Texture* Raycaster::createTexture(const TextureData& textureData) {
     _textures.emplace_back(std::make_unique<Texture>(textureData));
     return (_textures.end() - 1)->get();

@@ -43,6 +43,8 @@ static CudaFormatDescriptor formatToDescriptor(TextureFormat format) {
             return {8u, 8u, 8u, 8u, cudaChannelFormatKindUnsigned, cudaReadModeNormalizedFloat, true, 4};
         case TextureFormat::r8g8b8a8_unorm:
             return {8u, 8u, 8u, 8u, cudaChannelFormatKindUnsigned, cudaReadModeNormalizedFloat, false, 4};
+		case TextureFormat::r16g16b16a16_unorm:
+			return{ 16u, 16u, 16u, 16u, cudaChannelFormatKindUnsigned, cudaReadModeNormalizedFloat, false, 4 };
         case TextureFormat::r32g32b32a32_float:
             return {32u, 32u, 32u, 32u, cudaChannelFormatKindFloat, cudaReadModeElementType, false, 16};
         case TextureFormat::r16g16b16a16_float:
@@ -241,8 +243,8 @@ uint32_t CreateTexture(const TextureData& textureData) {
     texDesc.maxAnisotropy = 8;
 
     printf("width: %u, height: %u, stride: %u, elementSize: %u\n", textureData.width, textureData.height,
-           textureData.stride, desc.elementSize);
-    cutilSafeCall(cudaMemcpy2DToArray(tex.d_rawMemory, 0, 0, textureData.data, textureData.stride * desc.elementSize,
+           textureData.strideElements, desc.elementSize);
+    cutilSafeCall(cudaMemcpy2DToArray(tex.d_rawMemory, 0, 0, textureData.data, textureData.strideElements * desc.elementSize,
                                       textureData.width * desc.elementSize, textureData.height,
                                       cudaMemcpyHostToDevice));
 
@@ -276,6 +278,7 @@ void DestroyAllTextures() {
         cutilSafeCall(cudaDestroyTextureObject(gTextureAtlas[i].d_texObject));
     }
     cutilSafeCall(cudaFree(gDeviceTextureArray));
+    gTextureCount = 0;
 }
 
 Texture2D createEmptyTexture(uint32_t width,
@@ -316,6 +319,19 @@ Texture2D createEmptyTexture(uint32_t width,
     cutilSafeCall(cudaCreateSurfaceObject(&tex.d_surfaceObject, &resDesc));
 
     return tex;
+}
+
+CUDA_KERNEL void ClearKernel(Texture2D tex) {
+	uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
+	uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
+	if (x < tex.width*tex.elementSize && y < tex.height) {
+		surf2Dwrite<unsigned char>(0, tex.d_surfaceObject, x, y);
+	}
+}
+
+void clearTexture(Texture2D tex) {
+	KernelDim dim(tex.width*tex.elementSize, tex.height, 16, 8);
+	ClearKernel<<<dim.grid, dim.block>>>(tex);
 }
 
 } // namespace hvvr

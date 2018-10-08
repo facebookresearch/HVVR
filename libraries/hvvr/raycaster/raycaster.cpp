@@ -37,7 +37,7 @@ Raycaster::Raycaster(const RayCasterSpecification& spec) : _spec(spec), _sceneDi
     }
     _threadPool = std::make_unique<ThreadPool>(numThreads, threadInit);
 
-    if (!GPUContext::cudaInit()) {
+    if (!GPUContext::cudaInit(_spec.outputTo3DApi)) {
         assert(false);
     }
 
@@ -53,6 +53,27 @@ Raycaster::~Raycaster() {
         _gpuContext->cleanup();
 
     GPUContext::cudaCleanup();
+}
+
+void Raycaster::reinit(RayCasterGPUMode mode) {
+    cutilSafeCall(cudaDeviceSynchronize());
+
+    _cameras.clear();
+    cleanupScene();
+    if (_gpuContext)
+        _gpuContext->cleanup();
+    GPUContext::cudaCleanup();
+    _gpuContext.release();
+
+    cutilSafeCall(cudaDeviceReset());
+
+    _spec.mode = mode;
+
+    if (!GPUContext::cudaInit(_spec.outputTo3DApi)) {
+        assert(false);
+    }
+
+    _gpuContext = std::make_unique<GPUContext>();
 }
 
 Camera* Raycaster::createCamera(const FloatRect& viewport, float apertureRadius) {

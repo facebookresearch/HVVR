@@ -46,7 +46,16 @@ public:
     };
 
     uint32_t bytesPerPixel() const {
-        return (m_format == PixelFormat::RGBA8_SRGB) ? 4 : 16;
+		switch (m_format) {
+		case PixelFormat::RGBA8_SRGB:
+			return 4;
+		case PixelFormat::RGBA16:
+			return 8;
+		case PixelFormat::RGBA32F:
+			return 16;
+		}
+		assert(false);
+		return 0;
     }
     size_t sizeInMemory() const {
         return size_t(bytesPerPixel()) * m_stride * m_height;

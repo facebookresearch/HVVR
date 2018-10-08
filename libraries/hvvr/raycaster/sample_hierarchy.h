@@ -9,28 +9,54 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
-#include "traversal.h"
-#include "samples.h"
+#include "gpu_samples.h"
 #include "graphics_types.h"
+#include "samples.h"
+#include "traversal.h"
 
 namespace hvvr {
 
+struct SampleHierarchy2D {
+    DynamicArray<RayPacketFrustum2D> tileFrusta;
+    DynamicArray<RayPacketFrustum2D> blockFrusta;
+    DynamicArray<UnpackedSample> samples;
+    SampleHierarchy2D() {}
+    SampleHierarchy2D(ArrayView<SortedSample> sortedSamples,
+                      uint32_t blockCount,
+                      uint32_t validSampleCount,
+                      const FloatRect& cullRect,
+                      ThinLens thinLens,
+                      const matrix3x3& sampleToCamera);
+};
+
+struct Sample2Dto3DMappingSettings {
+    matrix3x3 sampleToCamera;
+    ThinLens thinLens;
+    enum class MappingType { Perspective, SphericalSection };
+    MappingType type = MappingType::Perspective;
+    // Only used for SphericalSection mapping
+    float fovXDegrees;
+    float fovYDegrees;
+    Sample2Dto3DMappingSettings() {}
+    Sample2Dto3DMappingSettings(matrix3x3 _sampleToCamera, ThinLens _thinLens)
+        : sampleToCamera(_sampleToCamera), thinLens(_thinLens) {}
+    static Sample2Dto3DMappingSettings sphericalSection(matrix3x3 _sampleToCamera,
+                                                        ThinLens _thinLens,
+                                                        float _fovXDegrees,
+                                                        float _fovYDegrees) {
+        Sample2Dto3DMappingSettings result(_sampleToCamera, _thinLens);
+        result.type = MappingType::SphericalSection;
+        result.fovXDegrees = _fovXDegrees;
+        result.fovYDegrees = _fovYDegrees;
+        return result;
+    }
+};
+
 struct SampleHierarchy {
-    DynamicArray<RayPacketFrustum2D> tileFrusta2D;
-    DynamicArray<RayPacketFrustum2D> blockFrusta2D;
     DynamicArray<RayPacketFrustum3D> tileFrusta3D;
     DynamicArray<RayPacketFrustum3D> blockFrusta3D;
-
-    void generate(ArrayView<SortedSample> sortedSamples,
-                  uint32_t blockCount,
-                  uint32_t validSampleCount,
-                  const FloatRect& cullRect,
-                  ArrayView<float> blockedSamplePositions,
-                  ArrayView<Sample::Extents> blockedSampleExtents,
-                  ThinLens thinLens,
-                  const matrix3x3& sampleToCamera);
-
-    void populate3DFrom2D(uint32_t blockCount, const matrix3x3& sampleToCamera, ThinLens thinLens);
+    DynamicArray<DirectionalBeam> directionalSamples;
+    void generateFrom2D(const SampleHierarchy2D& hierarchy2D, Sample2Dto3DMappingSettings settings);
 };
 
 } // namespace hvvr
