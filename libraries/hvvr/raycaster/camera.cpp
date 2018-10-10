@@ -49,10 +49,10 @@ SampleData::SampleData(const Sample* rawSamples,
     validSampleCount = uint32_t(rawSampleCount);
     samples.blockFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount);
     samples.tileFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount * TILES_PER_BLOCK);
-    samples.directionalSamples = DynamicArray<DirectionalBeam>(blockCount * BLOCK_SIZE);
+    samples.directionalBeams = DynamicArray<DirectionalBeam>(blockCount * BLOCK_SIZE);
 
-    samples2D = SampleHierarchy2D(sortedSamples, blockCount, validSampleCount, cullRect, settings2DTo3D.thinLens,
-                                  settings2DTo3D.sampleToCamera);
+    samples2D = BeamBatch2D(sortedSamples, blockCount, validSampleCount, cullRect, settings2DTo3D.thinLens,
+                            settings2DTo3D.sampleToCamera);
     samples.generateFrom2D(samples2D, settings2DTo3D);
 
     imageLocationToSampleIndex = DynamicArray<int32_t>(rtWidth * rtHeight * splitColorSamples);
@@ -150,7 +150,7 @@ void Camera::setSampleData(const SampleData& sampleData) {
     if (tileCount != _cpuHierarchy._tileFrusta.size()) {
         _cpuHierarchy._tileFrusta = DynamicArray<RayPacketFrustum3D>(tileCount);
     }
-    const DynamicArray<DirectionalBeam>& samples = sampleData.samples.directionalSamples;
+    const DynamicArray<DirectionalBeam>& samples = sampleData.samples.directionalBeams;
     _gpuCamera->updateConfig(_outputFormat, sampleData.imageLocationToSampleIndex.data(), samples.data(), _lens,
                              uint32_t(samples.size()), _renderTarget.width, _renderTarget.height,
                              uint32_t(_renderTarget.stride), sampleData.splitColorSamples);
@@ -199,9 +199,14 @@ void Camera::extractImage() {
     if (_renderTarget.isHardwareRenderTarget()) {
         gpuCamera->copyImageToBoundTexture();
     } else {
-        gpuCamera->copyImageToCPU((uint32_t*)_renderTarget.data, _renderTarget.width, _renderTarget.height,
-                                  uint32_t(_renderTarget.stride));
+        gpuCamera->copyImageToCPU(_renderTarget);
     }
+}
+
+void Camera::advanceJitter() {
+    vector2 jitter = _frameJitters[_frameCount % _frameJitters.size()];
+    _gpuCamera->setCameraJitter(vector2(jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f));
+    ++_frameCount;
 }
 
 Sample2Dto3DMappingSettings Camera::get2DSampleMappingSettings() const {

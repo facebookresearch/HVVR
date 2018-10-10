@@ -20,9 +20,8 @@ namespace hvvr {
 class Raycaster;
 
 struct FoveatedSampleData {
-    size_t validSampleCount = 0;
     size_t blockCount = 0;
-    SampleHierarchy samples;
+    BeamBatch samples;
     DynamicArray<SimpleRayFrustum> simpleTileFrusta;
     DynamicArray<SimpleRayFrustum> simpleBlockFrusta;
 };
@@ -35,7 +34,6 @@ struct EccentricityMap {
     float m;
     float w_0;
     float S;
-
 
     // Precomputed potentially expensive intermediates
     // log(m+1)

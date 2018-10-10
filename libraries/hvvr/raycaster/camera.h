@@ -27,9 +27,9 @@ class GPUContext;
 
 // preprocessed samples, ready for rendering
 struct SampleData {
-    SampleHierarchy2D samples2D;
+    BeamBatch2D samples2D;
     Sample2Dto3DMappingSettings settings2DTo3D;
-    SampleHierarchy samples;
+    BeamBatch samples;
     uint32_t splitColorSamples = 1;
 
     DynamicArray<int32_t> imageLocationToSampleIndex;
@@ -55,6 +55,11 @@ class Camera {
     friend void polarSpaceFoveatedSetup(Raycaster* raycaster);
 
 public:
+    struct CPUHierarchy {
+        DynamicArray<RayPacketFrustum3D> _blockFrusta;
+        DynamicArray<RayPacketFrustum3D> _tileFrusta;
+    };
+
     Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuContext);
     ~Camera();
 
@@ -102,6 +107,8 @@ public:
     void setupRenderTarget(GPUContext& context);
     void extractImage();
 
+    void advanceJitter();
+
 protected:
     Sample2Dto3DMappingSettings get2DSampleMappingSettings() const;
 
@@ -109,7 +116,6 @@ protected:
     float _fovYDegrees = 0.0f;
 
     // TODO(anankervis): clean up direct access of protected members by Raycaster
-
     GPUCamera* _gpuCamera;
 
     // Initialize to an invalid transform since there is no previous frame on the initial frame
@@ -131,10 +137,7 @@ protected:
     // Only for polar foveated sampling
     std::vector<vector2ui> _polarRemapToPixel;
 
-    struct CPUHierarchy {
-        DynamicArray<RayPacketFrustum3D> _blockFrusta;
-        DynamicArray<RayPacketFrustum3D> _tileFrusta;
-    } _cpuHierarchy;
+    CPUHierarchy _cpuHierarchy;
 
     transform _cameraToWorld = transform::identity();
 

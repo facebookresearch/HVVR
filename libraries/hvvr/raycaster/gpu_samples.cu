@@ -14,7 +14,7 @@
 namespace hvvr {
 
 CameraBeams::CameraBeams(const GPUCamera& camera) {
-    directionalBeams = camera.d_directionalBeams;
+    directionalBeams = camera.d_batchSpaceBeams;
     frameJitter = camera.frameJitter;
     lens = camera.lens;
 }

@@ -356,7 +356,7 @@ CUDA_KERNEL void GenerateHeat() {
 }
 #endif
 
-void GPUCamera::intersect(GPUSceneState& sceneState, const CameraBeams& cameraBeams) {
+void GPUCamera::intersect(GPUSceneState& sceneState, const CameraBeams& cameraBeams, const matrix4x4& cameraToWorld) {
     Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
     uint32_t occupiedTileCount = streamedData.tileCountOccupied;
@@ -442,7 +442,7 @@ CUDA_KERNEL void DumpRaysKernel(SimpleRay* rayBuffer,
     }
 }
 
-void GPUCamera::dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder) {
+void GPUCamera::dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder, const matrix4x4& cameraToWorld) {
     uint32_t rayCount = COLOR_MODE_MSAA_RATE * validSampleCount;
     GPUBuffer<SimpleRay> d_rays(rayCount);
     rays.resize(rayCount);

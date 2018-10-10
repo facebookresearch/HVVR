@@ -62,9 +62,9 @@ struct SortedSample : Sample {
 DynamicArray<Sample> getGridSamples(size_t width, size_t height);
 
 struct DirectionalBeam {
-	vector3 centerRay;
-	vector3 du;
-	vector3 dv;
+    vector3 centerRay;
+    vector3 du;
+    vector3 dv;
 };
 
 /*

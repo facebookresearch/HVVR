@@ -55,7 +55,7 @@ DynamicArray<DirectionalBeam> getEyeSpacePolarFoveatedSamples(size_t& samplesPer
     emap = EccentricityMap(marSlope, fovealMARDegrees, maxEyeTrackingUncertaintyDegrees);
 
     samplesPerRing = 0;
-	size_t ringCount = 0;
+    size_t ringCount = 0;
     size_t irregularGridSampleCount = 0;
     { // Calculate number of samples so we can allocate before generation
         float E = 0.0f;

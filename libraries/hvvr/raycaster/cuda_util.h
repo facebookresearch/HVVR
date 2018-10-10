@@ -59,7 +59,6 @@ struct KernelDim {
 
 #define CUDA_INF __int_as_float(0x7f800000)
 
-
 // Based on https://stackoverflow.com/questions/52286202/dynamic-dispatch-to-template-function-c
 // Use to generate all template function permutations and dispatch properly at runtime for a prefix of template booleans
 // Makes calling cuda kernels with many permutations concise.
@@ -69,15 +68,13 @@ struct KernelDim {
 // 	if (b1) {
 // 		if (b2) {
 // 			myFunc<true, true, true, otherArgs>(args);
-// 		}
-// 		else {
+// 		} else {
 // 			myFunc<true, true, false, otherArgs>(args);
 // 		}
 // 	} else {
 // 		if (b2) {
 // 			myFunc<true, false, true, otherArgs>(args);
-// 		}
-// 		else {
+// 		} else {
 // 			myFunc<true, false, false, otherArgs>(args);
 // 		}
 // 	}
@@ -85,15 +82,13 @@ struct KernelDim {
 // 	if (b1) {
 // 		if (b2) {
 // 			myFunc<false, true, true, otherArgs>(args);
-// 		}
-// 		else {
+// 		} else {
 // 			myFunc<false, true, false, otherArgs>(args);
 // 		}
 // 	} else {
 // 		if (b2) {
 // 			myFunc<false, false, true, otherArgs>(args);
-// 		}
-// 		else {
+// 		} else {
 // 			myFunc<false, false, false, otherArgs>(args);
 // 		}
 // 	}
@@ -129,3 +124,9 @@ struct dispatch_bools<0> {
     }
 };
 #pragma warning(pop)
+// Somewhat nicer standin for dispatch_bool, which can prevent mismatch errors between
+// template arg N and array size.
+template <std::size_t N, class F>
+void auto_dispatch_bools(std::array<bool, N> const& input, F&& continuation) {
+    dispatch_bools<N>{}(input, std::forward<F>(continuation));
+}

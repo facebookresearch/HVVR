@@ -9,9 +9,9 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include "dynamic_array.h"
 #include "magic_constants.h"
 #include "samples.h"
-#include "dynamic_array.h"
 
 namespace hvvr {
 

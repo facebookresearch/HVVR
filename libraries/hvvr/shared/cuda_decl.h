@@ -13,14 +13,14 @@
 
 #if defined(__CUDA_ARCH__)
 // we're compiling for the GPU target
-#define CUDA_COMPILE 1
-#define CUDA_ARCH __CUDA_ARCH__
+# define CUDA_COMPILE 1
+# define CUDA_ARCH __CUDA_ARCH__
 #else
-#define CUDA_COMPILE 0
-#define CUDA_ARCH 0
+# define CUDA_COMPILE 0
+# define CUDA_ARCH 0
 #endif
 
-#define CUDA_HOST __host__
+#define CUDA_HOST __host__ 
 #define CUDA_DEVICE __device__
 #define CUDA_DEVICE_INL inline CUDA_DEVICE
 #define CUDA_HOST_DEVICE __host__ __device__

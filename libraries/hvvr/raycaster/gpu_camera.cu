@@ -91,9 +91,7 @@ void GPUCamera::initLookupTables(int _MSAARate) {
 Camera_StreamedData* GPUCamera::streamedDataLock(uint32_t tileCount) {
     Camera_StreamedData* rval = streamed + streamedIndexCPU;
     cutilSafeCall(cudaEventSynchronize(rval->gpuDone));
-
     streamedIndexCPU = (streamedIndexCPU + 1) % frameBuffering;
-
     rval->reset(tileCount);
     return rval;
 }
@@ -128,10 +126,6 @@ void GPUCamera::streamedDataGpuDone() {
 
 void GPUCamera::setCameraJitter(vector2 jitter) {
     frameJitter = jitter;
-}
-
-void GPUCamera::updateTransform(const matrix4x4& _cameraToWorld) {
-    cameraToWorld = _cameraToWorld;
 }
 
 static int getMSAARate(RaycasterOutputFormat outputMode) {
@@ -169,7 +163,7 @@ void GPUCamera::updateConfig(RaycasterOutputFormat _outputMode,
     validSampleCount = imageWidth * imageHeight * splitColorSamples;
     d_sampleRemap = GPUBuffer<int32_t>(sampleRemap, sampleRemap + validSampleCount);
     sampleCount = _sampleCount;
-    d_directionalBeams = GPUBuffer<DirectionalBeam>(directionalSamples, directionalSamples + sampleCount);
+    d_batchSpaceBeams = GPUBuffer<DirectionalBeam>(directionalSamples, directionalSamples + sampleCount);
 
     outputMode = _outputMode;
     int msaaRate = getMSAARate(outputMode);
@@ -207,7 +201,6 @@ void GPUCamera::registerPolarFoveatedSamples(const std::vector<vector2ui>& polar
     sampleCount = paddedSampleCount;
     d_sampleResults = GPUBuffer<uint32_t>((paddedSampleCount * pixelFormatSize(outputFormat) + sizeof(uint32_t) - 1) /
                                           sizeof(uint32_t));
-    d_sampleRemap = GPUBuffer<int32_t>(paddedSampleCount);
 
     // For temporal filtering
     d_tMaxBuffer = GPUBuffer<float>(paddedSampleCount);
@@ -267,23 +260,16 @@ void GPUCamera::copyImageToBoundTexture() {
                                            resultImage.height(), cudaMemcpyDeviceToDevice, stream));
 }
 
-void GPUCamera::copyImageToCPU(uint32_t* imageData, uint32_t imageWidth, uint32_t imageHeight, uint32_t imageStride) {
+void GPUCamera::copyImageToCPU(ImageResourceDescriptor cpuTarget) {
+    assert(!cpuTarget.isHardwareRenderTarget());
     auto pixFormat = outputModeToPixelFormat(outputMode);
-    resultImage.update(imageWidth, imageHeight, imageStride, pixFormat);
-
+    resultImage.update(cpuTarget.width, cpuTarget.height, (uint32_t)cpuTarget.stride, pixFormat);
     cutilSafeCall(
-        cudaMemcpyAsync(imageData, resultImage.data(), resultImage.sizeInMemory(), cudaMemcpyDeviceToHost, 0));
+        cudaMemcpyAsync(cpuTarget.data, resultImage.data(), resultImage.sizeInMemory(), cudaMemcpyDeviceToHost, 0));
 }
 
-void GPUCamera::acquireTileCullData(SimpleRayFrustum* tileFrusta, SimpleRayFrustum* blockFrusta) {
-    cutilSafeCall(cudaEventSynchronize(transferTileToCPUEvent));
 
-    size_t blockCount = d_foveatedWorldSpaceBlockFrusta.size();
-    memcpy(blockFrusta, foveatedWorldSpaceBlockFrustaPinned, sizeof(SimpleRayFrustum) * blockCount);
-    memcpy(tileFrusta, foveatedWorldSpaceTileFrustaPinned, sizeof(SimpleRayFrustum) * blockCount * TILES_PER_BLOCK);
-}
-
-void GPUCamera::intersectShadeResolve(GPUSceneState& sceneState) {
+void GPUCamera::intersectShadeResolve(GPUSceneState& sceneState, const matrix4x4& cameraToWorld) {
     Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
     // prep the scene
@@ -300,8 +286,8 @@ void GPUCamera::intersectShadeResolve(GPUSceneState& sceneState) {
 
     CameraBeams cameraBeams(*this);
     if (streamedData.tileCountOccupied > 0) {
-        intersect(sceneState, cameraBeams);
-        shadeAndResolve(sceneState, cameraBeams);
+        intersect(sceneState, cameraBeams, cameraToWorld);
+        shadeAndResolve(sceneState, cameraBeams, cameraToWorld);
     }
 
     streamedDataGpuDone();

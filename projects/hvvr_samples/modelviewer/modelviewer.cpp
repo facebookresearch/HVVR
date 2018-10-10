@@ -26,6 +26,7 @@
 
 #pragma comment(lib, "Shcore.lib")
 
+
 #define RT_WIDTH 2160
 #define RT_HEIGHT 1200
 
@@ -47,7 +48,6 @@
 #define ENABLE_FOVEATED 0
 
 #define ENABLE_WIDE_FOV 0
-
 
 
 enum ModelviewerScene {
@@ -233,6 +233,7 @@ void GApp::onSimulation(double sceneTime, double deltaTime) {
         }
     }
 #endif
+
 }
 
 MSG GApp::run() {

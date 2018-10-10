@@ -19,7 +19,7 @@ enum class TextureFormat : uint32_t {
     none = 0,
     r8g8b8a8_unorm_srgb,
     r8g8b8a8_unorm,
-	r16g16b16a16_unorm,
+    r16g16b16a16_unorm,
     r32g32b32a32_float,
     r16g16b16a16_float,
     r11g11b10_float,
@@ -61,8 +61,8 @@ inline size_t getTextureSize(uint32_t strideElements, uint32_t height, TextureFo
             return elementCount * 4;
         case TextureFormat::r8g8b8a8_unorm:
             return elementCount * 4;
-		case TextureFormat::r16g16b16a16_unorm:
-			return elementCount * 8;
+        case TextureFormat::r16g16b16a16_unorm:
+            return elementCount * 8;
         case TextureFormat::r32g32b32a32_float:
             return elementCount * 16;
         case TextureFormat::r16g16b16a16_float:

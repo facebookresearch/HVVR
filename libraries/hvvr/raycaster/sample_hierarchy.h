@@ -16,17 +16,17 @@
 
 namespace hvvr {
 
-struct SampleHierarchy2D {
+struct BeamBatch2D {
     DynamicArray<RayPacketFrustum2D> tileFrusta;
     DynamicArray<RayPacketFrustum2D> blockFrusta;
     DynamicArray<UnpackedSample> samples;
-    SampleHierarchy2D() {}
-    SampleHierarchy2D(ArrayView<SortedSample> sortedSamples,
-                      uint32_t blockCount,
-                      uint32_t validSampleCount,
-                      const FloatRect& cullRect,
-                      ThinLens thinLens,
-                      const matrix3x3& sampleToCamera);
+    BeamBatch2D() {}
+    BeamBatch2D(ArrayView<SortedSample> sortedSamples,
+                uint32_t blockCount,
+                uint32_t validSampleCount,
+                const FloatRect& cullRect,
+                ThinLens thinLens,
+                const matrix3x3& sampleToCamera);
 };
 
 struct Sample2Dto3DMappingSettings {
@@ -52,11 +52,11 @@ struct Sample2Dto3DMappingSettings {
     }
 };
 
-struct SampleHierarchy {
+struct BeamBatch {
     DynamicArray<RayPacketFrustum3D> tileFrusta3D;
     DynamicArray<RayPacketFrustum3D> blockFrusta3D;
-    DynamicArray<DirectionalBeam> directionalSamples;
-    void generateFrom2D(const SampleHierarchy2D& hierarchy2D, Sample2Dto3DMappingSettings settings);
+    DynamicArray<DirectionalBeam> directionalBeams;
+    void generateFrom2D(const BeamBatch2D& hierarchy2D, Sample2Dto3DMappingSettings settings);
 };
 
 } // namespace hvvr

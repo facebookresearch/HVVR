@@ -78,13 +78,8 @@ CUDA_KERNEL void RemapKernel(PixelType* src,
 }
 
 void GPUCamera::remap() {
-    KernelDim dim;
-    if (resultImage.height() > 1) { // 2D Image
-        dim = KernelDim(resultImage.width(), resultImage.height(), CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
-    } else {
-        dim = KernelDim(resultImage.width(), CUDA_GROUP_SIZE);
-    }
 
+    KernelDim dim(resultImage.width(), resultImage.height(), CUDA_GROUP_WIDTH, CUDA_GROUP_HEIGHT);
     uint32_t* d_imageData = (uint32_t*)resultImage.data();
     switch (splitColorSamples) {
         case 1: {

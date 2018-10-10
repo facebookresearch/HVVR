@@ -73,17 +73,6 @@ void GPUContext::interopMapResources() {
         if (resources.size() > 0) {
             cutilSafeCall(cudaGraphicsMapResources((int)resources.size(), resources.data(), stream));
         }
-
-        for (auto& c : cameras) {
-            // Assumes if the result image is a linear vector, that we are directly writing into the result resource
-            if (c->resultImage.height() <= 1) {
-                if (c->resultsResource) {
-                    c->resultImage.updateFromLinearGraphicsResource(c->resultsResource, c->d_sampleRemap.size(),
-                                                                    outputModeToPixelFormat(c->outputMode));
-                }
-            }
-        }
-
         graphicsResourcesMapped = true;
     }
 }
@@ -109,10 +98,7 @@ void GPUContext::cleanup() {
         c->resultImage.reset();
         c->d_sampleResults = GPUBuffer<uint32_t>();
 
-        safeCudaEventDestroy(c->transferTileToCPUEvent);
         safeCudaStreamDestroy(c->stream);
-        safeCudaFreeHost(c->foveatedWorldSpaceTileFrustaPinned);
-        safeCudaFreeHost(c->foveatedWorldSpaceBlockFrustaPinned);
     }
     cameras.clear();
 }

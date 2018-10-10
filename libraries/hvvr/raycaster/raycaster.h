@@ -19,12 +19,13 @@
 
 struct PrecomputedTriangleShade;
 struct BVHNode;
-struct RayHierarchy;
-struct Camera_StreamedData;
-struct RayPacketFrustum3D;
 
 namespace hvvr {
 
+struct BeamBatch;
+struct RayHierarchy;
+struct Camera_StreamedData;
+struct RayPacketFrustum3D;
 class ThreadPool;
 class Camera;
 class Texture;
@@ -100,23 +101,28 @@ protected:
     void setupAllRenderTargets();
     void blitAllRenderTargets();
 
-    void interopMapResources();
-    void interopUnmapResources();
-
-
     //// rendering
     void renderCameraGPUIntersectAndReconstructDeferredMSAAResolve(std::unique_ptr<hvvr::Camera>& camera);
     void renderGPUIntersectAndReconstructDeferredMSAAResolve();
     void renderFoveatedPolarSpaceCudaReconstruct();
-    void renderCamera(std::unique_ptr<hvvr::Camera>& camera);
 
-    // traverse BVH and generate lists of triangles to intersect on the GPU
-    void buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed);
-    void transformHierarchyCameraToWorld(std::unique_ptr<hvvr::Camera>& camera,
-                                         const RayPacketFrustum3D* tilesSrc,
+    void intersectAndResolveBeamBatch(std::unique_ptr<Camera>& camera,
+                                      GPUSceneState& scene,
+                                      const BeamBatch& batch,
+                                      const matrix4x4& batchToWorld,
+                                      Plane cullPlanes[4]);
+
+    // traverse BVH and generate lists of triangles to intersect on the GPU. Returns the total number of triangles to intersect
+    uint64_t buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed);
+    // Could be moved to gpu with tile traversal
+    void transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesSrc,
                                          const RayPacketFrustum3D* blocksSrc,
+                                         RayPacketFrustum3D* tilesDst,
+                                         RayPacketFrustum3D* blocksDst,
+                                         const matrix4x4 cameraToWorld,
                                          uint32_t blockCount,
-                                         Camera_StreamedData* streamed);
+                                         Camera_StreamedData* streamed,
+                                         Plane cullPlanes[4]);
 };
 
 } // namespace hvvr

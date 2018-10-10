@@ -108,13 +108,21 @@ inline PixelFormat outputModeToPixelFormat(RaycasterOutputFormat mode) {
 // TODO(anankervis): merge with Camera class
 class GPUCamera {
 public:
-    // Terminology from http://cwyman.org/papers/siga16_gazeTrackedFoveatedRendering.pdf
-    TemporalFilterSettings temporalFilterSettings;
+    // Single point-of-origin rays defined in "batch-space" which will usually be camera-space
+    // In a standard foveated setup, these would be in eye-space
+    GPUBuffer<DirectionalBeam> d_batchSpaceBeams;
+    ThinLens lens;
+    // how far to jitter the samples this frame. length() < 1
+    vector2 frameJitter = {0.0f, 0.0f};
 
+    // Intermediate output, between intersection and resolve
     GPUBuffer<RaycasterGBufferSubsample> d_gBuffer;
-    GPUBuffer<DirectionalBeam> d_directionalBeams;
+
     GPUBuffer<int32_t> d_sampleRemap;
     uint32_t splitColorSamples = 1;
+
+    // Final result after mapping sample results to screen space
+    GPUImage resultImage;
 
     Camera_LocalData local;
 
@@ -134,26 +142,14 @@ public:
 
     GPUBuffer<vector2> d_tileSubsampleLensPos;
 
-    GPUBuffer<vector2ui> d_polarRemapToPixel;
-
-    GPUBuffer<DirectionalBeam> d_foveatedEyeDirectionalSamples;
-    GPUBuffer<SimpleRayFrustum> d_foveatedEyeSpaceTileFrusta;
-    GPUBuffer<SimpleRayFrustum> d_foveatedEyeSpaceBlockFrusta;
-    GPUBuffer<SimpleRayFrustum> d_foveatedWorldSpaceTileFrusta;
-    GPUBuffer<SimpleRayFrustum> d_foveatedWorldSpaceBlockFrusta;
-    SimpleRayFrustum* foveatedWorldSpaceTileFrustaPinned = nullptr;
-    SimpleRayFrustum* foveatedWorldSpaceBlockFrustaPinned = nullptr;
-
-    cudaEvent_t transferTileToCPUEvent = nullptr;
-
     GPUBuffer<uint32_t> d_sampleResults;
     GPUBuffer<uint32_t> d_sampleResultsRemapped;
-    GPUBuffer<uint32_t> d_foveaMask;
+
     uint32_t sampleCount;
     GPUBuffer<float> d_tMaxBuffer;
 
-    GPUImage resultImage;
-    // For polarFoveatedReconstruction
+    //// Foveation-specific data
+    GPUBuffer<vector2ui> d_polarRemapToPixel;
     struct PolarTextures {
         Texture2D raw;
         Texture2D depth;
@@ -162,7 +158,8 @@ public:
         Texture2D moment2;
     } polarTextures;
 
-    // For temporal filtering in polarFoveatedReconstruction
+    // Terminology from http://cwyman.org/papers/siga16_gazeTrackedFoveatedRendering.pdf
+    TemporalFilterSettings temporalFilterSettings;
     Texture2D previousResultTexture;
     Texture2D resultTexture;
 
@@ -171,20 +168,15 @@ public:
 
     EccentricityMap eccentricityMap;
     float maxEccentricityRadians;
+    ////
 
     cudaGraphicsResource_t resultsResource = NULL;
     uint32_t validSampleCount = 0;
-
-    matrix4x4 cameraToWorld;
-    ThinLens lens;
-
     cudaStream_t stream = 0;
 
     RaycasterOutputFormat outputMode = RaycasterOutputFormat::COLOR_RGBA8;
 
-    // how far to jitter the samples this frame. length() < 1
-    vector2 frameJitter = {0.0f, 0.0f};
-
+    // Used as a unique ID in the GPUContext
     const Camera* cameraPtr;
 
     GPUCamera(const Camera* cameraPtr);
@@ -193,62 +185,53 @@ public:
 
     // per-frame updates
     void setCameraJitter(vector2 jitter);
-    void updateTransform(const matrix4x4& _cameraToWorld);
-    void updatePerFrameFoveatedData(const FloatRect& sampleBounds,
-                                    const matrix3x3& cameraToSample,
-                                    const matrix3x3& eyeToCamera,
-                                    const matrix4x4& eyeToWorld);
 
     // sample config updates
     void updateConfig(RaycasterOutputFormat _outputMode,
                       int32_t* sampleRemap,
-                      DirectionalBeam* directionalSamples,
+                      DirectionalBeam* directionalBeams,
                       ThinLens _lens,
                       uint32_t _sampleCount,
                       uint32_t imageWidth,
                       uint32_t imageHeight,
                       uint32_t imageStride,
                       uint32_t _splitColorSamples);
-    void registerPolarFoveatedSamples(const std::vector<vector2ui>& polarRemapToPixel,
-                                      float _maxEccentricityRadians,
-                                      const EccentricityMap& eccentricityMap,
-                                      uint32_t samplesPerRing,
-                                      uint32_t paddedSampleCount);
-    void updateEyeSpaceFoveatedSamples(const ArrayView<DirectionalBeam> cameraBeams);
 
     // attach a texture from a 3D API
     bool bindTexture(GPUContext& gpuContext, ImageResourceDescriptor texture);
     // GPUContext::graphicsResourcesMapped must be true before calling this function
     void copyImageToBoundTexture();
 
-    void copyImageToCPU(uint32_t* imageData, uint32_t imageWidth, uint32_t imageHeight, uint32_t imageStride);
+    void copyImageToCPU(ImageResourceDescriptor cpuTarget);
 
-    // copy GPU-generated frusta data back to CPU for traversal (foveated render path)
-    // Assumes CalculatePerFrameFoveatedData has previously been called
-    void acquireTileCullData(SimpleRayFrustum* tileFrusta, SimpleRayFrustum* blockFrusta);
-
-    void intersectShadeResolve(GPUSceneState& sceneState);
+    void intersectShadeResolve(GPUSceneState& sceneState, const matrix4x4& cameraToWorld);
 
     // convert from linear post-resolve results buffer to results image
     void remap();
 
+    // Foveation-specific
+    void registerPolarFoveatedSamples(const std::vector<vector2ui>& polarRemapToPixel,
+                                      float _maxEccentricityRadians,
+                                      const EccentricityMap& eccentricityMap,
+                                      uint32_t samplesPerRing,
+                                      uint32_t paddedSampleCount);
+    void updateEyeSpaceFoveatedSamples(BeamBatch& beamHierarchy);
     void remapPolarFoveated();
-
     void foveatedPolarToScreenSpace(const matrix4x4& eyeToEyePrevious,
                                     const matrix3x3& eyePreviousToSamplePrevious,
                                     const matrix3x3& sampleToEye);
 
     // dump the current set of rays (including subsamples) to a CPU buffer
-    void dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder);
+    void dumpRays(std::vector<SimpleRay>& rays, bool outputScanlineOrder, const matrix4x4& cameraToWorld);
 
 protected:
     // intersect triangles
-    void intersect(GPUSceneState& sceneState, const CameraBeams& cameraBeams);
+    void intersect(GPUSceneState& sceneState, const CameraBeams& cameraBeams, const matrix4x4& cameraToWorld);
 
     // fill empty tiles with default clear value
     void clearEmpty();
     // shade occupied tiles and resolve AA subsamples
-    void shadeAndResolve(GPUSceneState& sceneState, const CameraBeams& cameraBeams);
+    void shadeAndResolve(GPUSceneState& sceneState, const CameraBeams& cameraBeams, const matrix4x4& cameraToWorld);
 
     void getEccentricityMap(EccentricityToTexCoordMapping& map) const;
 };

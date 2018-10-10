@@ -76,11 +76,6 @@ struct CameraBeams {
     CameraBeams(const GPUCamera& camera);
 };
 
-struct SampleDoF {
-    vector3 pos;
-    vector3 dir;
-};
-
 CUDA_DEVICE_INL DirectionalBeam GetDirectionalSample3D(uint32_t sampleIndex,
                                                        CameraBeams cameraBeams,
                                                        matrix4x4 cameraToWorld) {

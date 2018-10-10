@@ -71,54 +71,6 @@ CUDA_DEVICE vector4 bicubicFast(Texture2D tex, vector2 coord) {
            vector4(tex2D<float4>(T, t0.x, t1.y)) * s0.x * s1.y + vector4(tex2D<float4>(T, t1.x, t1.y)) * s1.x * s1.y;
 }
 
-CUDA_DEVICE vector2 directionToSampleSpaceSample(const matrix3x3& eyeSpaceToSampleSpaceMatrix,
-                                                 const vector3& direction) {
-    vector3 sampleSpaceSample = eyeSpaceToSampleSpaceMatrix * direction;
-    float invZ = (1.0f / sampleSpaceSample.z);
-    return vector2(sampleSpaceSample.x * invZ, sampleSpaceSample.y * invZ);
-}
-
-// Inclusive contains
-CUDA_DEVICE_INL bool rectContains(const FloatRect r, const vector2 p) {
-    return (p.x >= r.lower.x) && (p.x <= r.upper.x) && (p.y >= r.lower.y) && (p.y <= r.upper.y);
-}
-
-CUDA_KERNEL void TransformFoveatedSamplesToCameraSpaceKernel(const matrix3x3 eyeSpaceToSampleSpaceMatrix,
-                                                             const matrix3x3 eyeSpaceToCameraSpace,
-                                                             const FloatRect cullRect,
-                                                             const DirectionalBeam* eyeSpaceSamples,
-                                                             CameraBeams cameraBeams,
-                                                             int* remap,
-                                                             const uint32_t sampleCount) {
-    unsigned index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index < sampleCount) {
-        DirectionalBeam eyeBeam = eyeSpaceSamples[index];
-        vector2 c = {CUDA_INF, CUDA_INF};
-        DirectionalBeam cameraBeam = eyeSpaceToCameraSpace * eyeBeam;
-        if (cameraBeam.centerRay.z < 0.0f) {
-            vector2 s = directionToSampleSpaceSample(eyeSpaceToSampleSpaceMatrix, eyeBeam.centerRay);
-            if (rectContains(cullRect, s)) {
-                remap[index] = (int)index;
-            }
-        }
-        cameraBeams.directionalBeams[index] = cameraBeam;
-    }
-}
-
-void TransformFoveatedSamplesToCameraSpace(const matrix3x3& eyeSpaceToSampleSpaceMatrix,
-                                           const matrix3x3& eyeSpaceToCameraSpaceMatrix,
-                                           const FloatRect& sampleBounds,
-                                           const DirectionalBeam* d_eyeBeams,
-                                           CameraBeams cameraBeams,
-                                           int* d_remap,
-                                           const uint32_t sampleCount,
-                                           cudaStream_t stream) {
-    KernelDim dim = KernelDim(sampleCount, CUDA_GROUP_SIZE);
-    TransformFoveatedSamplesToCameraSpaceKernel<<<dim.grid, dim.block, 0, stream>>>(
-        eyeSpaceToSampleSpaceMatrix, eyeSpaceToCameraSpaceMatrix, sampleBounds, d_eyeBeams, cameraBeams, d_remap,
-        sampleCount);
-}
-
 struct EccentricityToTexCoordMapping {
     EccentricityMap eccentricityMap;
     float texMapSize;
@@ -423,76 +375,27 @@ void GPUCamera::foveatedPolarToScreenSpace(const matrix4x4& eyeToEyePrevious,
     std::swap(previousResultTexture, resultTexture);
 }
 
-void GPUCamera::updateEyeSpaceFoveatedSamples(const ArrayView<DirectionalBeam> eyeBeams) {
-    d_foveatedEyeDirectionalSamples = GPUBuffer<DirectionalBeam>(eyeBeams.cbegin(), eyeBeams.cend());
-
+void GPUCamera::updateEyeSpaceFoveatedSamples(BeamBatch& eyeHierarchy) {
+    ArrayView<hvvr::DirectionalBeam> eyeBeams = eyeHierarchy.directionalBeams;
+    d_batchSpaceBeams = GPUBuffer<DirectionalBeam>(eyeBeams.cbegin(), eyeBeams.cend());
+    validSampleCount = uint32_t(d_batchSpaceBeams.size());
     // Allocate and calculate eye-space frusta
     uint32_t blockCount = ((uint32_t)eyeBeams.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    d_foveatedEyeSpaceTileFrusta = GPUBuffer<SimpleRayFrustum>(blockCount * TILES_PER_BLOCK);
-    d_foveatedEyeSpaceBlockFrusta = GPUBuffer<SimpleRayFrustum>(blockCount);
-    d_foveatedWorldSpaceTileFrusta = GPUBuffer<SimpleRayFrustum>(blockCount * TILES_PER_BLOCK);
-    d_foveatedWorldSpaceBlockFrusta = GPUBuffer<SimpleRayFrustum>(blockCount);
+    GPUBuffer<SimpleRayFrustum> d_foveatedEyeSpaceTileFrusta =
+        GPUBuffer<SimpleRayFrustum>(blockCount * TILES_PER_BLOCK);
+    GPUBuffer<SimpleRayFrustum> d_foveatedEyeSpaceBlockFrusta = GPUBuffer<SimpleRayFrustum>(blockCount);
 
-    ComputeEyeSpaceFrusta(d_foveatedEyeDirectionalSamples, d_foveatedEyeSpaceTileFrusta, d_foveatedEyeSpaceBlockFrusta);
-
-    safeCudaEventDestroy(transferTileToCPUEvent);
-    cutilSafeCall(cudaEventCreateWithFlags(&transferTileToCPUEvent, cudaEventDisableTiming));
-
-    safeCudaFreeHost(foveatedWorldSpaceTileFrustaPinned);
-    safeCudaFreeHost(foveatedWorldSpaceBlockFrustaPinned);
-
-    cutilSafeCall(cudaMallocHost((void**)&foveatedWorldSpaceTileFrustaPinned,
-                                 sizeof(SimpleRayFrustum) * blockCount * TILES_PER_BLOCK));
-    cutilSafeCall(cudaMallocHost((void**)&foveatedWorldSpaceBlockFrustaPinned, sizeof(SimpleRayFrustum) * blockCount));
-}
-
-Plane operator*(matrix4x4 M, Plane p) {
-    vector4 O = vector4(p.normal * p.dist, 1.0f);
-    O = M * O;
-    vector3 N = vector3(transpose(invert(M)) * vector4(p.normal, 0));
-    return Plane{N, dot(vector3(O), N)};
-}
-
-void GPUCamera::updatePerFrameFoveatedData(const FloatRect& sampleBounds,
-                                           const matrix3x3& cameraToSample,
-                                           const matrix3x3& eyeToCamera,
-                                           const matrix4x4& eyeToWorld) {
-    validSampleCount = uint32_t(d_foveatedEyeDirectionalSamples.size());
-    CameraBeams cameraBeams(*this);
-    uint32_t tileCount = uint32_t(d_foveatedWorldSpaceTileFrusta.size());
-    uint32_t blockCount = uint32_t(d_foveatedWorldSpaceBlockFrusta.size());
-
-
-    matrix3x3 eyeToSample = cameraToSample * eyeToCamera;
-    TransformFoveatedSamplesToCameraSpace(eyeToSample, eyeToCamera, sampleBounds, d_foveatedEyeDirectionalSamples,
-                                          cameraBeams, d_sampleRemap, validSampleCount, stream);
-
-    auto sampleToCamera = invert(cameraToSample);
-
-    auto U = sampleBounds.upper;
-    auto L = sampleBounds.lower;
-
-    vector2 sampleDirs[4] = {{U.x, U.y}, {L.x, U.y}, {L.x, L.y}, {U.x, L.y}};
-
-    const float EPSILON = -0.01f;
-    FourPlanes cullPlanes;
-    for (int i = 0; i < 4; ++i) {
-        vector3 dir0 = sampleToCamera * vector3(sampleDirs[i], 1.0f);
-        vector3 dir1 = sampleToCamera * vector3(sampleDirs[(i + 1) % 4], 1.0f);
-        Plane eyeSpacePlane;
-        eyeSpacePlane.normal = invert(eyeToCamera) * normalize(cross(dir1, dir0));
-        eyeSpacePlane.dist = EPSILON;
-        cullPlanes.data[i] = eyeToWorld * eyeSpacePlane;
+    ComputeEyeSpaceFrusta(d_batchSpaceBeams, d_foveatedEyeSpaceTileFrusta, d_foveatedEyeSpaceBlockFrusta);
+    DynamicArray<SimpleRayFrustum> simpleTileFrusta(d_foveatedEyeSpaceTileFrusta.size());
+    DynamicArray<SimpleRayFrustum> simpleBlockFrusta(d_foveatedEyeSpaceBlockFrusta.size());
+    d_foveatedEyeSpaceTileFrusta.readback(simpleTileFrusta.data());
+    d_foveatedEyeSpaceBlockFrusta.readback(simpleBlockFrusta.data());
+    for (int i = 0; i < eyeHierarchy.tileFrusta3D.size(); ++i) {
+        eyeHierarchy.tileFrusta3D[i] = simpleTileFrusta[i];
     }
-
-    CalculateWorldSpaceFrusta(d_foveatedWorldSpaceBlockFrusta, d_foveatedWorldSpaceTileFrusta,
-                              d_foveatedEyeSpaceBlockFrusta, d_foveatedEyeSpaceTileFrusta, eyeToWorld, cullPlanes,
-                              blockCount, tileCount, stream);
-    // Queue the copy back
-    d_foveatedWorldSpaceBlockFrusta.readbackAsync(foveatedWorldSpaceBlockFrustaPinned, stream);
-    d_foveatedWorldSpaceTileFrusta.readbackAsync(foveatedWorldSpaceTileFrustaPinned, stream);
-
-    cutilSafeCall(cudaEventRecord(transferTileToCPUEvent, stream));
+    for (int i = 0; i < eyeHierarchy.blockFrusta3D.size(); ++i) {
+        eyeHierarchy.blockFrusta3D[i] = simpleBlockFrusta[i];
+    }
 }
 
 } // namespace hvvr

@@ -775,7 +775,7 @@ static void cullThread(const RayHierarchy& rayHierarchy,
 #endif
 }
 
-void Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed) {
+uint64_t Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed) {
     const BVHNode* nodes = _nodes.data();
     ArrayView<uint32_t> triIndices(streamed->triIndices.dataHost(), streamed->triIndices.size());
 
@@ -832,10 +832,8 @@ void Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_
         taskResults[i] = _threadPool->addTask(cullThread, rayHierarchy, startBlock, endBlock, nodes, &taskData[i]);
     }
 
-#if DEBUG_STATS
     uint64_t triIndexCount = 0;
     uint32_t maxTaskTriCount = 0;
-#endif
     uint32_t tileTriOffsetsStreamed = 0;
     uint32_t* streamTileIndexRemapEmpty = streamed->tileIndexRemapEmpty.dataHost();
     uint32_t* streamTileIndexRemapOccupied = streamed->tileIndexRemapOccupied.dataHost();
@@ -861,12 +859,10 @@ void Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_
             streamTileTriRanges[tileTriOffsetsStreamed++] = triRangeGlobal;
         }
 
-#if DEBUG_STATS
         triIndexCount += task.triIndexCount;
         maxTaskTriCount = max(maxTaskTriCount, task.triIndexCount);
-#endif
     }
-
+    (void)maxTaskTriCount;
 #if DEBUG_STATS || TIME_BLOCK_CULL
     double deltaTime = timer.get();
     static double minDeltaTime = DBL_MAX;
@@ -883,6 +879,7 @@ void Raycaster::buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_
     printf("Total Triangle Idx Count %u\n", triIndexCount);
     printf("Max Triangle Idx Count Per Task %u\n", maxTaskTriCount);
 #endif
+    return triIndexCount;
 }
 
 } // namespace hvvr

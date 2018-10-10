@@ -24,6 +24,7 @@
 // dump in binary or text format?
 #define DUMP_BINARY 1
 
+
 namespace hvvr {
 
 #if DUMP_SCENE_AND_RAYS
@@ -126,7 +127,9 @@ static void dumpSceneToOFF(const std::string& filename, const std::vector<std::u
 }
 
 
-static void dumpSceneAndRays(GPUCamera* gpuCamera, const std::vector<std::unique_ptr<Model>>& models) {
+static void dumpSceneAndRays(GPUCamera* gpuCamera,
+                             const matrix4x4& cameraToWorld,
+                             const std::vector<std::unique_ptr<Model>>& models) {
     static bool dumped = false;
     if (!dumped) {
         Timer timer;
@@ -134,7 +137,7 @@ static void dumpSceneAndRays(GPUCamera* gpuCamera, const std::vector<std::unique
         dumpSceneToOFF("scene_dump.off", models);
 
         std::vector<SimpleRay> rays;
-        gpuCamera->dumpRays(rays, DUMP_IN_SCANLINE_ORDER == 1);
+        gpuCamera->dumpRays(rays, DUMP_IN_SCANLINE_ORDER == 1, cameraToWorld);
         dumpRaysToRFF("ray_dump.rff", rays);
 
         double dumpTime = timer.get();
@@ -164,7 +167,7 @@ void Raycaster::render(double elapsedTime) {
     }
 }
 
-static inline void debugPrintTileCost(const SampleHierarchy& samples, size_t blockCount) {
+static inline void debugPrintTileCost(const BeamBatch& samples, size_t blockCount) {
     double maxCost = 0.0f;
     double meanCost = 0.0f;
 
@@ -196,16 +199,6 @@ static inline void debugPrintTileCost(const SampleHierarchy& samples, size_t blo
     printf("Mean Block Cost: %f\nMax Block Cost: %f\n", meanBlockCost, maxBlockCost);
 }
 
-inline static FloatRect expandRect(const FloatRect& rect, const float fractionToExpand) {
-    const vector2 extent = {rect.upper.x - rect.lower.x, rect.upper.y - rect.lower.y};
-    const vector2 newLower = {rect.lower.x - (extent.x * fractionToExpand),
-                              rect.lower.y - (extent.y * fractionToExpand)};
-    const vector2 newUpper = {rect.upper.x + (extent.x * fractionToExpand),
-                              rect.upper.y + (extent.y * fractionToExpand)};
-    return {newLower, newUpper};
-}
-
-
 void Raycaster::setupAllRenderTargets() {
     // Do DX11/CUDA interop setup if necessary
     for (auto& camera : _cameras) {
@@ -214,39 +207,41 @@ void Raycaster::setupAllRenderTargets() {
 }
 
 void Raycaster::blitAllRenderTargets() {
+    _gpuContext->interopMapResources();
     // Copy the results to the camera's DX texture
     for (auto& camera : _cameras) {
         if (!camera->getEnabled())
             continue;
         camera->extractImage();
     }
-}
-
-void Raycaster::interopMapResources() {
-    _gpuContext->interopMapResources();
-}
-
-void Raycaster::interopUnmapResources() {
     _gpuContext->interopUnmapResources();
 }
 
-void Raycaster::transformHierarchyCameraToWorld(std::unique_ptr<hvvr::Camera>& camera,
-                                                const RayPacketFrustum3D* tilesSrc,
+static bool planeCullsFrustum(const Plane plane, const SimpleRayFrustum& frustum) {
+    bool allout = true;
+    for (int i = 0; i < 4; ++i) {
+        allout = allout && dot(plane.normal, frustum.origins[i]) > plane.dist;
+        // Extend rays far-out
+        allout = allout && dot(plane.normal, frustum.origins[i] + frustum.directions[i] * 10000.0f) > plane.dist;
+    }
+    return allout;
+}
+
+
+void Raycaster::transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesSrc,
                                                 const RayPacketFrustum3D* blocksSrc,
+                                                RayPacketFrustum3D* tilesDst,
+                                                RayPacketFrustum3D* blocksDst,
+                                                const matrix4x4 cameraToWorld,
                                                 uint32_t blockCount,
-                                                Camera_StreamedData* streamed) {
-    matrix4x4 cameraToWorld = camera->getCameraToWorld();
+                                                Camera_StreamedData* streamed,
+                                                Plane cullPlanes[4]) {
     matrix4x4 cameraToWorldInvTrans = transpose(invert(cameraToWorld));
-
-    RayPacketFrustum3D* blocksDst = camera->_cpuHierarchy._blockFrusta.data();
-
-    RayPacketFrustum3D* tilesDst = camera->_cpuHierarchy._tileFrusta.data();
 
     SimpleRayFrustum* simpleTileFrusta = streamed->tileFrusta3D.dataHost();
 
     auto blockTransformTask = [&](uint32_t startBlock, uint32_t endBlock) -> void {
         assert((_mm_getcsr() & 0x8040) == 0x8040); // make sure denormals are being treated as zero
-
         for (uint32_t blockIndex = startBlock; blockIndex < endBlock; blockIndex++) {
             blocksDst[blockIndex] = blocksSrc[blockIndex].transform(cameraToWorld, cameraToWorldInvTrans);
 
@@ -264,18 +259,55 @@ void Raycaster::transformHierarchyCameraToWorld(std::unique_ptr<hvvr::Camera>& c
         }
     };
 
+    auto blockTransformAndCullTask = [&](uint32_t startBlock, uint32_t endBlock) -> void {
+        assert((_mm_getcsr() & 0x8040) == 0x8040); // make sure denormals are being treated as zero
+        for (uint32_t blockIndex = startBlock; blockIndex < endBlock; blockIndex++) {
+            blocksDst[blockIndex] = blocksSrc[blockIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+
+            uint32_t startTile = blockIndex * TILES_PER_BLOCK;
+            uint32_t endTile = startTile + TILES_PER_BLOCK;
+            for (uint32_t tileIndex = startTile; tileIndex < endTile; tileIndex++) {
+                RayPacketFrustum3D& tileDst = tilesDst[tileIndex];
+                tileDst = tilesSrc[tileIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+                SimpleRayFrustum& simpleFrustum = simpleTileFrusta[tileIndex];
+                for (int n = 0; n < RayPacketFrustum3D::pointCount; n++) {
+                    simpleFrustum.origins[n] = tileDst.pointOrigin[n];
+                    simpleFrustum.directions[n] = tileDst.pointDir[n];
+                }
+                bool culled = false;
+                for (int i = 0; i < 4; ++i) {
+                    culled = culled || planeCullsFrustum(cullPlanes[i], simpleFrustum);
+                }
+                if (culled) {
+                    for (int i = 0; i < 4; ++i) {
+                        // Signal degenerate frustum
+                        simpleFrustum.origins[i] = vector3(INFINITY, INFINITY, INFINITY);
+                        simpleFrustum.directions[i] = vector3(0, 0, 0);
+                    }
+                    tileDst = simpleFrustum;
+                }
+            }
+        }
+    };
+
+
     enum { maxTasks = 4096 };
     enum { blocksPerThread = 16 };
     uint32_t numTasks = (blockCount + blocksPerThread - 1) / blocksPerThread;
     assert(numTasks <= maxTasks);
     numTasks = min<uint32_t>(maxTasks, numTasks);
 
+
+    bool mustCull = !isinf(cullPlanes[0].dist);
     std::future<void> taskResults[maxTasks];
     for (uint32_t i = 0; i < numTasks; ++i) {
         uint32_t startBlock = min(blockCount, i * blocksPerThread);
         uint32_t endBlock = min(blockCount, (i + 1) * blocksPerThread);
-
-        taskResults[i] = _threadPool->addTask(blockTransformTask, startBlock, endBlock);
+        if (mustCull) {
+            taskResults[i] = _threadPool->addTask(blockTransformAndCullTask, startBlock, endBlock);
+        } else {
+            taskResults[i] = _threadPool->addTask(blockTransformTask, startBlock, endBlock);
+        }
     }
     for (uint32_t i = 0; i < numTasks; ++i) {
         taskResults[i].get();
@@ -286,61 +318,20 @@ void Raycaster::renderCameraGPUIntersectAndReconstructDeferredMSAAResolve(std::u
     if (!camera->getEnabled())
         return;
 
-    const SampleHierarchy& samples = camera->getSampleData().samples;
-    uint32_t tileCount = uint32_t(samples.tileFrusta3D.size());
+    const BeamBatch& batch = camera->getSampleData().samples;
 
-    GPUCamera* gpuCamera = camera->_gpuCamera;
-    // begin filling data for the GPU
-    Camera_StreamedData* streamed = gpuCamera->streamedDataLock(tileCount);
-    {
-        vector2 jitter = camera->_frameJitters[camera->_frameCount % camera->_frameJitters.size()];
-        gpuCamera->setCameraJitter(vector2(jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f));
-        ++camera->_frameCount;
+    const matrix4x4& cameraToWorld = camera->getCameraToWorld();
+    Plane p = Plane::createDegenerate();
+    Plane cullPlanes[4] = {p, p, p, p};
 
-        transformHierarchyCameraToWorld(camera, samples.tileFrusta3D.data(), samples.blockFrusta3D.data(),
-                                        uint32_t(samples.blockFrusta3D.size()), streamed);
+    intersectAndResolveBeamBatch(camera, _gpuContext->sceneState, batch, cameraToWorld, cullPlanes);
 
-        gpuCamera->updateTransform(camera->getCameraToWorld());
-
-        RayHierarchy rayHierachy;
-        rayHierachy.blockFrusta = camera->_cpuHierarchy._blockFrusta;
-        rayHierachy.tileFrusta = camera->_cpuHierarchy._tileFrusta;
-
-#if DUMP_SCENE_AND_RAYS
-        dumpSceneAndRays(gpuCamera, _models);
-#endif
-
-        buildTileTriangleLists(rayHierachy, streamed);
-
-        // end filling data for the GPU
-    }
-    gpuCamera->streamedDataUnlock();
-
-    gpuCamera->intersectShadeResolve(_gpuContext->sceneState);
-    gpuCamera->remap();
-}
-
-void Raycaster::renderCamera(std::unique_ptr<hvvr::Camera>& camera) {
-    if (!camera->getEnabled())
-        return;
-
-    if (_spec.outputTo3DApi == true) {
-        camera->setupRenderTarget(*_gpuContext);
-        interopMapResources();
-    }
-
-    renderCameraGPUIntersectAndReconstructDeferredMSAAResolve(camera);
-
-    if (_spec.outputTo3DApi == true) {
-        camera->extractImage();
-        interopUnmapResources();
-    }
+    camera->_gpuCamera->remap();
 }
 
 void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
     if (_spec.outputTo3DApi == true) {
         setupAllRenderTargets();
-        interopMapResources();
     }
 
     // Render and reconstruct from each camera
@@ -350,101 +341,96 @@ void Raycaster::renderGPUIntersectAndReconstructDeferredMSAAResolve() {
 
     if (_spec.outputTo3DApi == true) {
         blitAllRenderTargets();
-        interopUnmapResources();
     }
 }
 
+static void cullRectToCullPlanes(const FloatRect cullRect,
+                                 Plane cullPlanes[4],
+                                 matrix3x3 sampleToCamera,
+                                 matrix3x3 cameraToEye,
+                                 matrix4x4 eyeToWorld) {
+    auto U = cullRect.upper;
+    auto L = cullRect.lower;
+
+    vector2 sampleDirs[4] = {{U.x, U.y}, {L.x, U.y}, {L.x, L.y}, {U.x, L.y}};
+
+    const float EPSILON = -0.01f;
+    for (int i = 0; i < 4; ++i) {
+        vector3 dir0 = sampleToCamera * vector3(sampleDirs[i], 1.0f);
+        vector3 dir1 = sampleToCamera * vector3(sampleDirs[(i + 1) % 4], 1.0f);
+        Plane eyeSpacePlane;
+        eyeSpacePlane.normal = cameraToEye * normalize(cross(dir1, dir0));
+        eyeSpacePlane.dist = EPSILON;
+        cullPlanes[i] = eyeToWorld * eyeSpacePlane;
+    }
+}
+
+void Raycaster::intersectAndResolveBeamBatch(std::unique_ptr<Camera>& camera,
+                                             GPUSceneState& scene,
+                                             const BeamBatch& batch,
+                                             const matrix4x4& batchToWorld,
+                                             Plane cullPlanes[4]) {
+    GPUCamera* gpuCamera = camera->_gpuCamera;
+    uint32_t tileCount = uint32_t(batch.tileFrusta3D.size());
+
+    // begin filling data for the GPU
+    Camera_StreamedData* streamed = gpuCamera->streamedDataLock(tileCount);
+    {
+        camera->advanceJitter();
+
+        Camera::CPUHierarchy& cHier = camera->_cpuHierarchy;
+
+        transformHierarchyCameraToWorld(batch.tileFrusta3D.data(), batch.blockFrusta3D.data(), cHier._tileFrusta.data(),
+                                        cHier._blockFrusta.data(), batchToWorld, uint32_t(batch.blockFrusta3D.size()),
+                                        streamed, cullPlanes);
+
+        RayHierarchy rayHierachy;
+        rayHierachy.blockFrusta = cHier._blockFrusta;
+        rayHierachy.tileFrusta = cHier._tileFrusta;
+
+#if DUMP_SCENE_AND_RAYS
+        dumpSceneAndRays(gpuCamera, camera->getCameraToWorld(), _models);
+#endif
+
+        buildTileTriangleLists(rayHierachy, streamed);
+
+        // end filling data for the GPU
+    }
+    gpuCamera->streamedDataUnlock();
+    gpuCamera->intersectShadeResolve(scene, batchToWorld);
+};
+
 // TODO(anankervis): merge into a single render path
 void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
-    polarSpaceFoveatedSetup(this);
     if (_spec.outputTo3DApi == true) {
         setupAllRenderTargets();
     }
-    for (auto& camera : _cameras) {
-        if (!camera->getEnabled())
-            continue;
-        GPUCamera* gpuCamera = camera->_gpuCamera;
-
-        const vector3& eyeDirection = camera->getEyeDir();
-
-        vector2 jitter = camera->_frameJitters[camera->_frameCount % camera->_frameJitters.size()];
-        gpuCamera->setCameraJitter(vector2(jitter.x * 0.5f + 0.5f, jitter.y * 0.5f + 0.5f));
-        ++camera->_frameCount;
-
-        matrix3x3 cameraToSample = invert(camera->getSampleToCamera());
-        matrix3x3 eyeToCamera = matrix3x3::rotationFromZAxis(-eyeDirection);
-        matrix4x4 eyeToWorld = camera->getCameraToWorld() * matrix4x4(eyeToCamera);
-
-        gpuCamera->updatePerFrameFoveatedData(camera->getSampleData().sampleBounds, cameraToSample, eyeToCamera,
-                                              eyeToWorld);
-
-        auto blockCount = (camera->_foveatedSampleData.samples.directionalSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        camera->_foveatedSampleData.blockCount = blockCount;
-    }
-
-    if (_spec.outputTo3DApi == true) {
-        interopMapResources();
-    }
+    polarSpaceFoveatedSetup(this);
     {
         for (auto& camera : _cameras) {
             if (!camera->getEnabled())
                 continue;
-            GPUCamera* gpuCamera = camera->_gpuCamera;
-
-            gpuCamera->acquireTileCullData(camera->_foveatedSampleData.simpleTileFrusta.data(),
-                                           camera->_foveatedSampleData.simpleBlockFrusta.data());
-            uint32_t blockCount = uint32_t(camera->_foveatedSampleData.simpleBlockFrusta.size());
-            uint32_t tileCount = uint32_t(camera->_foveatedSampleData.simpleTileFrusta.size());
-
-            // begin filling data for the GPU
-            Camera_StreamedData* streamed = gpuCamera->streamedDataLock(tileCount);
-
-            for (uint32_t i = 0; i < blockCount; ++i) {
-                camera->_foveatedSampleData.samples.blockFrusta3D[i] =
-                    RayPacketFrustum3D(camera->_foveatedSampleData.simpleBlockFrusta[i]);
-            }
-
-            SimpleRayFrustum* simpleTileFrusta = streamed->tileFrusta3D.dataHost();
-            for (uint32_t i = 0; i < tileCount; ++i) {
-                camera->_foveatedSampleData.samples.tileFrusta3D[i] =
-                    RayPacketFrustum3D(camera->_foveatedSampleData.simpleTileFrusta[i]);
-
-                // TODO(anankervis): avoid the GPU -> CPU -> CPU -> GPU copy of the SimpleRayFrustum
-                simpleTileFrusta[i] = camera->_foveatedSampleData.simpleTileFrusta[i];
-            }
-
-            gpuCamera->updateTransform(camera->getCameraToWorld());
-
-            RayHierarchy rayHierarchy;
-            rayHierarchy.blockFrusta = ArrayView<const RayPacketFrustum3D>(
-                camera->_foveatedSampleData.samples.blockFrusta3D.data(), camera->_foveatedSampleData.blockCount);
-            rayHierarchy.tileFrusta =
-                ArrayView<const RayPacketFrustum3D>(camera->_foveatedSampleData.samples.tileFrusta3D.data(),
-                                                    camera->_foveatedSampleData.blockCount * TILES_PER_BLOCK);
-
-            // Uncomment to get stats on how good the block/tile clustering is working
-            // debugPrintTileCost(camera->polarFoveatedSampleData.samples, camera->polarFoveatedSampleData.blockCount);
-            buildTileTriangleLists(rayHierarchy, streamed);
-
-            // size_t totalTris = _bvhScene.triangles.size;
-            // size_t trisIntersected = camera->tileCullInfo.triIndexCount;
-            // printf("Intersection Ratio %f: %d/%d\n", (float)trisIntersected/totalTris, trisIntersected, totalTris);
-
-            // end filling data for the GPU
-            gpuCamera->streamedDataUnlock();
-
-            gpuCamera->intersectShadeResolve(_gpuContext->sceneState);
-            gpuCamera->remapPolarFoveated();
 
             const vector3& eyeDirection = camera->getEyeDir();
             matrix3x3 eyeToCamera = matrix3x3::rotationFromZAxis(-eyeDirection);
-            matrix3x3 sampleToEye = invert(eyeToCamera) * camera->getSampleToCamera();
+            matrix4x4 cameraToWorld = camera->getCameraToWorld();
+            matrix4x4 eyeToWorld = cameraToWorld * matrix4x4(eyeToCamera);
 
-            matrix4x4 eyeToWorld = camera->getCameraToWorld() * matrix4x4(eyeToCamera);
+            Plane cullPlanes[4];
+            cullRectToCullPlanes(camera->getSampleData().sampleBounds, cullPlanes, camera->getSampleToCamera(),
+                                 invert(eyeToCamera), eyeToWorld);
+            const BeamBatch& samples = camera->_foveatedSampleData.samples;
+
+            intersectAndResolveBeamBatch(camera, _gpuContext->sceneState, samples, eyeToWorld, cullPlanes);
+
+            camera->_gpuCamera->remapPolarFoveated();
+
+            matrix3x3 sampleToEye = invert(eyeToCamera) * camera->getSampleToCamera();
             matrix4x4 eyeToEyePrevious = camera->_worldToEyePrevious * eyeToWorld;
 
             // Handles Temporal Filtering if necessary
-            gpuCamera->foveatedPolarToScreenSpace(eyeToEyePrevious, camera->_eyePreviousToSamplePrevious, sampleToEye);
+            camera->_gpuCamera->foveatedPolarToScreenSpace(eyeToEyePrevious, camera->_eyePreviousToSamplePrevious,
+                                                           sampleToEye);
 
             camera->_worldToEyePrevious = invert(eyeToWorld);
             camera->_eyePreviousToSamplePrevious = invert(sampleToEye);
@@ -452,7 +438,6 @@ void Raycaster::renderFoveatedPolarSpaceCudaReconstruct() {
     }
     if (_spec.outputTo3DApi == true) {
         blitAllRenderTargets();
-        interopUnmapResources();
     }
 }
 

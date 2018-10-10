@@ -459,7 +459,9 @@ CUDA_KERNEL void ResolveKernel(uint32_t* sampleResults,
 }
 
 
-void GPUCamera::shadeAndResolve(GPUSceneState& sceneState, const CameraBeams& cameraBeams) {
+void GPUCamera::shadeAndResolve(GPUSceneState& sceneState,
+                                const CameraBeams& cameraBeams,
+                                const matrix4x4& cameraToWorld) {
     Camera_StreamedData& streamedData = streamed[streamedIndexGPU];
 
     static_assert(TILE_SIZE % WARP_SIZE == 0, "Tile size must be a multiple of warp size in the current architecture. "
@@ -486,8 +488,6 @@ void GPUCamera::shadeAndResolve(GPUSceneState& sceneState, const CameraBeams& ca
         cudaEventRecord(start, stream);
     }
 #endif
-
-
     KernelDim dim(streamedData.tileCountOccupied * TILE_SIZE, TILE_SIZE);
 
     bool hasTMax = (d_tMaxBuffer.size() != 0);
@@ -496,12 +496,12 @@ void GPUCamera::shadeAndResolve(GPUSceneState& sceneState, const CameraBeams& ca
 
 #pragma warning(push)
 #pragma warning(disable : 4100)
-    dispatch_bools<2>{}(bargs, [&](auto... Bargs) {
+	auto_dispatch_bools(bargs, [&](auto... Bargs) {
         ResolveKernel<decltype(Bargs)::value..., COLOR_MODE_MSAA_RATE, TILE_SIZE><<<dim.grid, dim.block, 0, stream>>>(
-            d_sampleResults, d_tMaxBuffer, d_gBuffer, cameraBeams, cameraToWorld, d_tileSubsampleLensPos,
-            local.tileIndexRemapOccupied.data(), sceneState.trianglesIntersect, sceneState.trianglesShade,
-            sceneState.worldSpaceVertices, sceneState.materials, gDeviceTextureArray, sceneState.lightingEnvironment,
-            resolveStatsPtr);
+            d_sampleResults, d_tMaxBuffer, d_gBuffer, cameraBeams, cameraToWorld,
+            d_tileSubsampleLensPos, local.tileIndexRemapOccupied.data(), sceneState.trianglesIntersect,
+            sceneState.trianglesShade, sceneState.worldSpaceVertices, sceneState.materials, gDeviceTextureArray,
+            sceneState.lightingEnvironment, resolveStatsPtr);
     });
 #pragma warning(pop)
 
@@ -551,7 +551,6 @@ void GPUCamera::clearEmpty() {
 
     dim3 dimGrid(blockCount, 1, 1);
     dim3 dimBlock(CUDA_GROUP_SIZE, 1, 1);
-
 
     float* tMaxBuffer = (d_tMaxBuffer.size() != 0) ? d_tMaxBuffer.data() : nullptr;
     ClearEmptyKernel<<<dimGrid, dimBlock, 0, stream>>>(d_sampleResults, tMaxBuffer, d_emptyTileIndexRemap, tileCount);

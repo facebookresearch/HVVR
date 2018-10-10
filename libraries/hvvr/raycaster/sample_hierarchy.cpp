@@ -129,7 +129,7 @@ static RayPacketFrustum3D get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D
 // When switching to a general fit of non-pinhole camera space rays, we'll need to consider how
 // the ray thickness (majorAxisLength) works in camera space (it's not a uniform thickness in
 // camera space, unlike sample space).
-void SampleHierarchy::generateFrom2D(const SampleHierarchy2D& hierarchy2D, Sample2Dto3DMappingSettings settings) {
+void BeamBatch::generateFrom2D(const BeamBatch2D& hierarchy2D, Sample2Dto3DMappingSettings settings) {
     for (uint32_t blockIndex = 0; blockIndex < hierarchy2D.blockFrusta.size(); ++blockIndex) {
         const auto& blockFrustum2D = hierarchy2D.blockFrusta[blockIndex];
         for (uint32_t tileIndex = 0; tileIndex < TILES_PER_BLOCK; ++tileIndex) {
@@ -140,7 +140,7 @@ void SampleHierarchy::generateFrom2D(const SampleHierarchy2D& hierarchy2D, Sampl
     }
     for (uint32_t sampleIndex = 0; sampleIndex < hierarchy2D.samples.size(); ++sampleIndex) {
         UnpackedSample us = hierarchy2D.samples[sampleIndex];
-        DirectionalBeam& ds = directionalSamples[sampleIndex];
+        DirectionalBeam& ds = directionalBeams[sampleIndex];
         ds.centerRay = settings.sampleToCamera * vector3(us.center, 1.0f);
         ds.du = settings.sampleToCamera * vector3(us.majorAxis, 0.0f);
         ds.dv = settings.sampleToCamera * vector3(us.minorAxis, 0.0f);
@@ -154,12 +154,12 @@ void SampleHierarchy::generateFrom2D(const SampleHierarchy2D& hierarchy2D, Sampl
     }
 }
 
-SampleHierarchy2D::SampleHierarchy2D(ArrayView<SortedSample> sortedSamples,
-                                     uint32_t blockCount,
-                                     uint32_t validSampleCount,
-                                     const FloatRect& cullRect,
-                                     ThinLens lens,
-                                     const matrix3x3& sampleToCamera) {
+BeamBatch2D::BeamBatch2D(ArrayView<SortedSample> sortedSamples,
+                         uint32_t blockCount,
+                         uint32_t validSampleCount,
+                         const FloatRect& cullRect,
+                         ThinLens lens,
+                         const matrix3x3& sampleToCamera) {
     (void)lens;
     (void)sampleToCamera;
     uint32_t maxIndex = validSampleCount - 1;

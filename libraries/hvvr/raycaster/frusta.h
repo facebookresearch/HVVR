@@ -26,14 +26,4 @@ void ComputeEyeSpaceFrusta(const GPUBuffer<DirectionalBeam>& dirSamples,
                            GPUBuffer<SimpleRayFrustum>& tileFrusta,
                            GPUBuffer<SimpleRayFrustum>& blockFrusta);
 
-void CalculateWorldSpaceFrusta(SimpleRayFrustum* blockFrustaWS,
-                               SimpleRayFrustum* tileFrustaWS,
-                               SimpleRayFrustum* blockFrustaES,
-                               SimpleRayFrustum* tileFrustaES,
-                               matrix4x4 eyeToWorldMatrix,
-                               FourPlanes cullPlanes,
-                               uint32_t blockCount,
-                               uint32_t tileCount,
-                               cudaStream_t stream);
-
 } // namespace hvvr

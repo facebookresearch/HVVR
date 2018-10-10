@@ -74,7 +74,6 @@ public:
     }
 
 protected:
-
     LightUnion _lightUnion;
 };
 

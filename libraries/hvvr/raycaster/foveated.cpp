@@ -52,7 +52,7 @@ void generateEyeSpacePolarFoveatedSampleData(FoveatedSampleData& foveatedSampleD
                                              EccentricityMap& eccentricityMap,
                                              size_t& samplesPerRing,
                                              RayCasterSpecification::FoveatedSamplePattern pattern) {
-    if (foveatedSampleData.samples.directionalSamples.size() == 0) {
+    if (foveatedSampleData.samples.directionalBeams.size() == 0) {
         DynamicArray<DirectionalBeam> unsortedEyeSpaceSamples =
             getEyeSpacePolarFoveatedSamples(samplesPerRing, eccentricityMap, pattern.degreeTrackingError,
                                             pattern.maxFOVDegrees, pattern.marSlope, pattern.fovealMARDegrees);
@@ -63,10 +63,10 @@ void generateEyeSpacePolarFoveatedSampleData(FoveatedSampleData& foveatedSampleD
         {
             DynamicArray<uint32_t> oldToNewRemap(unsortedEyeSpaceSamples.size());
             generateRemapForFoveatedSamples(unsortedEyeSpaceSamples, oldToNewRemap);
-			foveatedSampleData.samples.directionalSamples = DynamicArray<DirectionalBeam>(unsortedEyeSpaceSamples.size());
+            foveatedSampleData.samples.directionalBeams = DynamicArray<DirectionalBeam>(unsortedEyeSpaceSamples.size());
             polarRemapToPixel.resize(unsortedEyeSpaceSamples.size());
             for (size_t i = 0; i < unsortedEyeSpaceSamples.size(); ++i) {
-				foveatedSampleData.samples.directionalSamples[oldToNewRemap[i]] = unsortedEyeSpaceSamples[i];
+                foveatedSampleData.samples.directionalBeams[oldToNewRemap[i]] = unsortedEyeSpaceSamples[i];
                 polarRemapToPixel[oldToNewRemap[i]] = {(uint32_t)(i % samplesPerRing), (uint32_t)(i / samplesPerRing)};
             }
         }
@@ -74,6 +74,7 @@ void generateEyeSpacePolarFoveatedSampleData(FoveatedSampleData& foveatedSampleD
         // Allocate the most you will ever need to prevent per-frame allocation
         foveatedSampleData.samples.blockFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount);
         foveatedSampleData.samples.tileFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount * TILES_PER_BLOCK);
+        foveatedSampleData.blockCount = blockCount;
     }
 }
 
@@ -82,24 +83,29 @@ void polarSpaceFoveatedSetup(Raycaster* raycaster) {
         if (!camera->getEnabled())
             continue;
         // Generate eye space samples if necessary
-        if (camera->_foveatedSampleData.samples.directionalSamples.size() == 0) {
+        BeamBatch& beamHierarchy = camera->_foveatedSampleData.samples;
+        DynamicArray<DirectionalBeam>& cameraBeams = beamHierarchy.directionalBeams;
+        if (cameraBeams.size() == 0) {
             size_t samplesPerRing;
-
             EccentricityMap eccentricityMap;
             generateEyeSpacePolarFoveatedSampleData(camera->_foveatedSampleData, camera->_polarRemapToPixel,
                                                     eccentricityMap, samplesPerRing,
                                                     raycaster->_spec.foveatedSamplePattern);
             float maxEccentricityRadians = raycaster->_spec.foveatedSamplePattern.maxFOVDegrees * RadiansPerDegree;
-            size_t paddedSampleCount =
-                ((camera->_foveatedSampleData.samples.directionalSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
+            size_t paddedSampleCount = ((cameraBeams.size() + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
             camera->_gpuCamera->registerPolarFoveatedSamples(camera->_polarRemapToPixel, maxEccentricityRadians,
                                                              eccentricityMap, uint32_t(samplesPerRing),
                                                              uint32_t(paddedSampleCount));
-            camera->_gpuCamera->updateEyeSpaceFoveatedSamples(camera->_foveatedSampleData.samples.directionalSamples);
-            camera->_foveatedSampleData.simpleBlockFrusta =
-                DynamicArray<SimpleRayFrustum>(camera->_foveatedSampleData.samples.blockFrusta3D.size());
-            camera->_foveatedSampleData.simpleTileFrusta =
-                DynamicArray<SimpleRayFrustum>(camera->_foveatedSampleData.samples.tileFrusta3D.size());
+            camera->_gpuCamera->updateEyeSpaceFoveatedSamples(beamHierarchy);
+
+            size_t blockCount = beamHierarchy.blockFrusta3D.size();
+            size_t tileCount = beamHierarchy.tileFrusta3D.size();
+            if (blockCount != camera->_cpuHierarchy._blockFrusta.size()) {
+                camera->_cpuHierarchy._blockFrusta = DynamicArray<RayPacketFrustum3D>(blockCount);
+            }
+            if (tileCount != camera->_cpuHierarchy._tileFrusta.size()) {
+                camera->_cpuHierarchy._tileFrusta = DynamicArray<RayPacketFrustum3D>(tileCount);
+            }
         }
     }
 }

@@ -188,7 +188,17 @@ struct SimpleRayFrustum {
 struct Plane {
     vector3 normal;
     float dist;
+    static Plane createDegenerate() {
+        return Plane{vector3(0, 0, 0), (float)INFINITY};
+    }
 };
+
+inline Plane operator*(matrix4x4 M, Plane p) {
+    vector4 O = vector4(p.normal * p.dist, 1.0f);
+    O = M * O;
+    vector3 N = vector3(transpose(invert(M)) * vector4(p.normal, 0));
+    return Plane{N, dot(vector3(O), N)};
+}
 
 // A precomputed triangle, optimized for intersection.
 struct PrecomputedTriangleIntersect {
