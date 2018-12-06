@@ -15,7 +15,6 @@
 #include "raycaster_common.h"
 #include "thread_pool.h"
 #include "timer.h"
-#include "../shared/3rdparty/lodepng.h"
 
 #define DUMP_SCENE_AND_RAYS 0
 // If disabled, rays are blocked the same way they are during tracing,
