@@ -56,8 +56,8 @@ class Camera {
 
 public:
     struct CPUHierarchy {
-        DynamicArray<RayPacketFrustum3D> _blockFrusta;
-        DynamicArray<RayPacketFrustum3D> _tileFrusta;
+        DynamicArray<Frustum> _blockFrusta;
+        DynamicArray<Frustum> _tileFrusta;
     };
 
     Camera(const FloatRect& viewport, float apertureRadius, GPUContext& gpuContext);

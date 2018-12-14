@@ -44,7 +44,7 @@ static vector3 sphericalUVToDirection(vector2 uv, float fovX, float fovY) {
 // When converting from 2D samples to 3D, we can simplify this a bit
 // Choose the major axis to be the Z axis. The near plane is z=0, the far plane can just be a camera parameter (negative
 // Z) The AABB for the near plane is just the AABB of the lens.
-static RayPacketFrustum3D get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D,
+static Frustum get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D,
                                              Sample2Dto3DMappingSettings settings) {
     auto lens = settings.thinLens;
     auto sampleToCamera = settings.sampleToCamera;
@@ -78,8 +78,7 @@ static RayPacketFrustum3D get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D
             rayDirections[i] = sphericalUVToDirection(uvCurrent, settings.fovXDegrees, settings.fovYDegrees);
         }
 
-        return RayPacketFrustum3D(nearPoints[0], rayDirections[0], nearPoints[1], rayDirections[1], nearPoints[2],
-                                  rayDirections[2], nearPoints[3], rayDirections[3]);
+        return Frustum(nearPoints, rayDirections);
     }
 
     // Compute extrema points on the focal plane
@@ -121,8 +120,7 @@ static RayPacketFrustum3D get3DFrustumFrom2D(const RayPacketFrustum2D& frustum2D
         finalDirections[i] = normalize(farPoints[i] - nearPoints[i]);
     }
 
-    return RayPacketFrustum3D(nearPoints[0], finalDirections[0], nearPoints[1], finalDirections[1], nearPoints[2],
-                              finalDirections[2], nearPoints[3], finalDirections[3]);
+    return Frustum(nearPoints, finalDirections);
 }
 
 // We'll take the easy way out for now and transform the 2D sample space rect into camera space.

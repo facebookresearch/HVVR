@@ -16,6 +16,48 @@
 
 namespace hvvr {
 
+// Encoding of a frustum for ray packet traversal
+struct RayPacketFrustum2D {
+    // xMin, xNegMax, yMin, yNegMax
+    vector4 data;
+
+    RayPacketFrustum2D(float xMin, float xMax, float yMin, float yMax) : data(xMin, -xMax, yMin, -yMax) {}
+    RayPacketFrustum2D() = default;
+
+    // Set the mins to infinity and maxs to -infinity
+    void setEmpty() {
+        data = vector4(std::numeric_limits<float>::infinity());
+    }
+    void merge(float x, float y) {
+        data = min(data, vector4(x, -x, y, -y));
+    }
+    void merge(const RayPacketFrustum2D& other) {
+        data = min(data, other.data);
+    }
+    void intersect(const RayPacketFrustum2D& other) {
+        data = max(data, other.data);
+    }
+
+    inline float xMin() const {
+        return data.x;
+    }
+    inline float xMax() const {
+        return -data.y;
+    }
+    inline float yMin() const {
+        return data.z;
+    }
+    inline float yMax() const {
+        return -data.w;
+    }
+    inline float xNegMax() const {
+        return data.y;
+    }
+    inline float yNegMax() const {
+        return data.w;
+    }
+};
+
 struct BeamBatch2D {
     DynamicArray<RayPacketFrustum2D> tileFrusta;
     DynamicArray<RayPacketFrustum2D> blockFrusta;
@@ -53,8 +95,8 @@ struct Sample2Dto3DMappingSettings {
 };
 
 struct BeamBatch {
-    DynamicArray<RayPacketFrustum3D> tileFrusta3D;
-    DynamicArray<RayPacketFrustum3D> blockFrusta3D;
+    DynamicArray<Frustum> tileFrusta3D;
+    DynamicArray<Frustum> blockFrusta3D;
     DynamicArray<DirectionalBeam> directionalBeams;
     void generateFrom2D(const BeamBatch2D& hierarchy2D, Sample2Dto3DMappingSettings settings);
 };

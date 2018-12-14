@@ -88,6 +88,12 @@
     <ClInclude Include="traversal.h">
       <Filter>scene</Filter>
     </ClInclude>
+    <ClInclude Include="traverse_avx.h">
+      <Filter>scene</Filter>
+    </ClInclude>
+    <ClInclude Include="traverse_ref.h">
+      <Filter>scene</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="sample_hierarchy.cpp">
@@ -115,6 +121,15 @@
       <Filter>scene</Filter>
     </ClCompile>
     <ClCompile Include="traversal.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="traverse_avx.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="traverse_ref_bvh.cpp">
+      <Filter>scene</Filter>
+    </ClCompile>
+    <ClCompile Include="traverse_ref_frustum.cpp">
       <Filter>scene</Filter>
     </ClCompile>
   </ItemGroup>

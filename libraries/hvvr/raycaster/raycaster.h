@@ -9,6 +9,7 @@
  * of patent rights can be found in the PATENTS file in the same directory.
  */
 
+#include "bvh_node.h"
 #include "dynamic_array.h"
 #include "graphics_types.h"
 #include "raycaster_spec.h"
@@ -18,14 +19,12 @@
 #include <vector>
 
 struct PrecomputedTriangleShade;
-struct BVHNode;
 
 namespace hvvr {
 
 struct BeamBatch;
 struct RayHierarchy;
 struct Camera_StreamedData;
-struct RayPacketFrustum3D;
 class ThreadPool;
 class Camera;
 class Texture;
@@ -114,15 +113,6 @@ protected:
 
     // traverse BVH and generate lists of triangles to intersect on the GPU. Returns the total number of triangles to intersect
     uint64_t buildTileTriangleLists(const RayHierarchy& rayHierarchy, Camera_StreamedData* streamed);
-    // Could be moved to gpu with tile traversal
-    void transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesSrc,
-                                         const RayPacketFrustum3D* blocksSrc,
-                                         RayPacketFrustum3D* tilesDst,
-                                         RayPacketFrustum3D* blocksDst,
-                                         const matrix4x4 cameraToWorld,
-                                         uint32_t blockCount,
-                                         Camera_StreamedData* streamed,
-                                         Plane cullPlanes[4]);
 };
 
 } // namespace hvvr

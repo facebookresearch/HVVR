@@ -72,8 +72,8 @@ void generateEyeSpacePolarFoveatedSampleData(FoveatedSampleData& foveatedSampleD
         }
         auto blockCount = (unsortedEyeSpaceSamples.size() + BLOCK_SIZE - 1) / BLOCK_SIZE;
         // Allocate the most you will ever need to prevent per-frame allocation
-        foveatedSampleData.samples.blockFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount);
-        foveatedSampleData.samples.tileFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount * TILES_PER_BLOCK);
+        foveatedSampleData.samples.blockFrusta3D = DynamicArray<Frustum>(blockCount);
+        foveatedSampleData.samples.tileFrusta3D = DynamicArray<Frustum>(blockCount * TILES_PER_BLOCK);
         foveatedSampleData.blockCount = blockCount;
     }
 }
@@ -101,10 +101,10 @@ void polarSpaceFoveatedSetup(Raycaster* raycaster) {
             size_t blockCount = beamHierarchy.blockFrusta3D.size();
             size_t tileCount = beamHierarchy.tileFrusta3D.size();
             if (blockCount != camera->_cpuHierarchy._blockFrusta.size()) {
-                camera->_cpuHierarchy._blockFrusta = DynamicArray<RayPacketFrustum3D>(blockCount);
+                camera->_cpuHierarchy._blockFrusta = DynamicArray<Frustum>(blockCount);
             }
             if (tileCount != camera->_cpuHierarchy._tileFrusta.size()) {
-                camera->_cpuHierarchy._tileFrusta = DynamicArray<RayPacketFrustum3D>(tileCount);
+                camera->_cpuHierarchy._tileFrusta = DynamicArray<Frustum>(tileCount);
             }
         }
     }

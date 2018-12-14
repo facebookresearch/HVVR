@@ -391,10 +391,10 @@ void GPUCamera::updateEyeSpaceFoveatedSamples(BeamBatch& eyeHierarchy) {
     d_foveatedEyeSpaceTileFrusta.readback(simpleTileFrusta.data());
     d_foveatedEyeSpaceBlockFrusta.readback(simpleBlockFrusta.data());
     for (int i = 0; i < eyeHierarchy.tileFrusta3D.size(); ++i) {
-        eyeHierarchy.tileFrusta3D[i] = simpleTileFrusta[i];
+        eyeHierarchy.tileFrusta3D[i] = Frustum(simpleTileFrusta[i].origins, simpleTileFrusta[i].directions);
     }
     for (int i = 0; i < eyeHierarchy.blockFrusta3D.size(); ++i) {
-        eyeHierarchy.blockFrusta3D[i] = simpleBlockFrusta[i];
+        eyeHierarchy.blockFrusta3D[i] = Frustum(simpleBlockFrusta[i].origins, simpleBlockFrusta[i].directions);
     }
 }
 

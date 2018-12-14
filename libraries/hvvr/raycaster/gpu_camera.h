@@ -39,14 +39,6 @@ struct RaycasterGBufferSubsample {
     }
 };
 
-// Keep in sync with blockcull.h/RayPacketFrustum2D
-struct GPURayPacketFrustum {
-    float xMin;
-    float xNegMax;
-    float yMin;
-    float yNegMax;
-};
-
 struct TemporalFilterSettings {
     // 1 entirely use current sample
     float alpha = .05f;

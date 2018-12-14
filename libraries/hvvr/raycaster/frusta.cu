@@ -102,10 +102,10 @@ void ComputeEyeSpaceFrusta(const GPUBuffer<DirectionalBeam>& dirSamples,
             }
             if (checkFrustaAccuracy) {
                 // Make sure all samples points are within the frustum...
-                RayPacketFrustum3D checker(f);
+                Frustum checker(f.origins, f.directions);
                 for (int s = sBegin; s < sEnd; ++s) {
                     auto C = samples[s].centerRay;
-                    if (!checker.testPoint(C)) {
+                    if (!frustumTestPoint(checker, C)) {
                         printf("TROUBLE: f[%d]: s[%d]:%f %f %f \n", i, s, C.x, C.y, C.z);
                     }
                 }

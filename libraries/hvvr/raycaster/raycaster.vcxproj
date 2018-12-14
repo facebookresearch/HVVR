@@ -47,6 +47,8 @@
     <ClInclude Include="texture_internal.h" />
     <ClInclude Include="tile_data.h" />
     <ClInclude Include="traversal.h" />
+    <ClInclude Include="traverse_avx.h" />
+    <ClInclude Include="traverse_ref.h" />
     <ClInclude Include="warp_ops.h" />
   </ItemGroup>
   <ItemGroup>
@@ -61,6 +63,9 @@
     <ClCompile Include="scene.cpp" />
     <ClCompile Include="scene_update.cpp" />
     <ClCompile Include="traversal.cpp" />
+    <ClCompile Include="traverse_avx.cpp" />
+    <ClCompile Include="traverse_ref_bvh.cpp" />
+    <ClCompile Include="traverse_ref_frustum.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\shared\shared.vcxproj">

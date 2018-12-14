@@ -19,7 +19,7 @@
 #define DUMP_SCENE_AND_RAYS 0
 // If disabled, rays are blocked the same way they are during tracing,
 // which should improve coherence but makes visualization more difficult
-#define DUMP_IN_SCANLINE_ORDER 0
+#define DUMP_IN_SCANLINE_ORDER 1
 // dump in binary or text format?
 #define DUMP_BINARY 1
 
@@ -125,6 +125,60 @@ static void dumpSceneToOFF(const std::string& filename, const std::vector<std::u
 #endif
 }
 
+static void dumpBVH(const std::string& filename, const std::vector<std::unique_ptr<Model>>& models) {
+    struct DumpedBVHNode {
+        uint32_t leafMask;
+        union {
+            struct Children {
+                uint32_t pad0;
+                uint32_t offset[4];
+            } children;
+            struct Leaves {
+                // leaf0 = [triIndices[0], triIndices[1]), leaf1 = [triIndices[1], triIndices[2]), ...
+                uint32_t triIndices[5];
+            } leaves;
+        };
+    };
+
+    std::vector<DumpedBVHNode> nodes;
+    for (uint32_t modelIndex = 0; modelIndex < uint32_t(models.size()); modelIndex++) {
+        const Model& model = *(models[modelIndex]);
+        const MeshData& meshData = model.getMesh();
+        for (const auto& srcNode : meshData.nodes) {
+            DumpedBVHNode node;
+            memcpy(&node, &srcNode, sizeof(DumpedBVHNode));
+            nodes.push_back(node);
+        }
+    }
+
+    assert(nodes.size() <= INT_MAX);
+
+#if DUMP_BINARY
+    FILE* file = fopen((filename + "b").c_str(), "wb");
+    char header[4] = {'B', 'F', 'F', 'b'};
+    fwrite(header, sizeof(header), 1, file);
+
+    int nodeCount = int(nodes.size());
+    fwrite(&nodeCount, sizeof(nodeCount), 1, file);
+
+    fwrite(nodes.data(), sizeof(DumpedBVHNode) * nodeCount, 1, file);
+    fclose(file);
+#else
+    FILE* file = fopen(filename.c_str(), "w");
+    fprintf(file, "BFF\n");
+    fprintf(file, "%d\n", (int)nodes.size());
+    for (const auto& node : nodes) {
+        fprintf(file, "%u %u %u %u %u %u\n",
+            node.leafMask,
+            node.leaves.triIndices[0],
+            node.leaves.triIndices[1],
+            node.leaves.triIndices[2],
+            node.leaves.triIndices[3],
+            node.leaves.triIndices[4]);
+    }
+    fclose(file);
+#endif
+}
 
 static void dumpSceneAndRays(GPUCamera* gpuCamera,
                              const matrix4x4& cameraToWorld,
@@ -133,6 +187,7 @@ static void dumpSceneAndRays(GPUCamera* gpuCamera,
     if (!dumped) {
         Timer timer;
 
+        dumpBVH("bvh_dump.bff", models);
         dumpSceneToOFF("scene_dump.off", models);
 
         std::vector<SimpleRay> rays;
@@ -145,8 +200,6 @@ static void dumpSceneAndRays(GPUCamera* gpuCamera,
         dumped = true;
     }
 }
-
-
 #endif // DUMP_SCENE_AND_RAYS
 
 void Raycaster::render(double elapsedTime) {
@@ -170,7 +223,7 @@ static inline void debugPrintTileCost(const BeamBatch& samples, size_t blockCoun
     double maxCost = 0.0f;
     double meanCost = 0.0f;
 
-    auto frustumCost = [](RayPacketFrustum3D f) {
+    auto frustumCost = [](Frustum f) {
         vector3* dirs = f.pointDir;
         double a0 = (double)length(cross(dirs[0] - dirs[1], dirs[0] - f.pointDir[3]));
         double a1 = (double)length(cross(dirs[2] - dirs[1], dirs[2] - f.pointDir[3]));
@@ -227,30 +280,29 @@ static bool planeCullsFrustum(const Plane plane, const SimpleRayFrustum& frustum
 }
 
 
-void Raycaster::transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesSrc,
-                                                const RayPacketFrustum3D* blocksSrc,
-                                                RayPacketFrustum3D* tilesDst,
-                                                RayPacketFrustum3D* blocksDst,
-                                                const matrix4x4 cameraToWorld,
-                                                uint32_t blockCount,
-                                                Camera_StreamedData* streamed,
-                                                Plane cullPlanes[4]) {
-    matrix4x4 cameraToWorldInvTrans = transpose(invert(cameraToWorld));
-
+void transformHierarchyCameraToWorld(const Frustum* tilesSrc,
+                                     const Frustum* blocksSrc,
+                                     Frustum* tilesDst,
+                                     Frustum* blocksDst,
+                                     const matrix4x4 cameraToWorld,
+                                     uint32_t blockCount,
+                                     Camera_StreamedData* streamed,
+                                     Plane cullPlanes[4],
+                                     ThreadPool& threadPool) {
     SimpleRayFrustum* simpleTileFrusta = streamed->tileFrusta3D.dataHost();
 
     auto blockTransformTask = [&](uint32_t startBlock, uint32_t endBlock) -> void {
         assert((_mm_getcsr() & 0x8040) == 0x8040); // make sure denormals are being treated as zero
         for (uint32_t blockIndex = startBlock; blockIndex < endBlock; blockIndex++) {
-            blocksDst[blockIndex] = blocksSrc[blockIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+            blocksDst[blockIndex] = frustumTransform(blocksSrc[blockIndex], cameraToWorld);
 
             uint32_t startTile = blockIndex * TILES_PER_BLOCK;
             uint32_t endTile = startTile + TILES_PER_BLOCK;
             for (uint32_t tileIndex = startTile; tileIndex < endTile; tileIndex++) {
-                RayPacketFrustum3D& tileDst = tilesDst[tileIndex];
-                tileDst = tilesSrc[tileIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+                Frustum& tileDst = tilesDst[tileIndex];
+                tileDst = frustumTransform(tilesSrc[tileIndex], cameraToWorld);
                 SimpleRayFrustum& simpleFrustum = simpleTileFrusta[tileIndex];
-                for (int n = 0; n < RayPacketFrustum3D::pointCount; n++) {
+                for (int n = 0; n < Frustum::pointCount; n++) {
                     simpleFrustum.origins[n] = tileDst.pointOrigin[n];
                     simpleFrustum.directions[n] = tileDst.pointDir[n];
                 }
@@ -261,15 +313,15 @@ void Raycaster::transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesS
     auto blockTransformAndCullTask = [&](uint32_t startBlock, uint32_t endBlock) -> void {
         assert((_mm_getcsr() & 0x8040) == 0x8040); // make sure denormals are being treated as zero
         for (uint32_t blockIndex = startBlock; blockIndex < endBlock; blockIndex++) {
-            blocksDst[blockIndex] = blocksSrc[blockIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+            blocksDst[blockIndex] = frustumTransform(blocksSrc[blockIndex], cameraToWorld);
 
             uint32_t startTile = blockIndex * TILES_PER_BLOCK;
             uint32_t endTile = startTile + TILES_PER_BLOCK;
             for (uint32_t tileIndex = startTile; tileIndex < endTile; tileIndex++) {
-                RayPacketFrustum3D& tileDst = tilesDst[tileIndex];
-                tileDst = tilesSrc[tileIndex].transform(cameraToWorld, cameraToWorldInvTrans);
+                Frustum& tileDst = tilesDst[tileIndex];
+                tileDst = frustumTransform(tilesSrc[tileIndex], cameraToWorld);
                 SimpleRayFrustum& simpleFrustum = simpleTileFrusta[tileIndex];
-                for (int n = 0; n < RayPacketFrustum3D::pointCount; n++) {
+                for (int n = 0; n < Frustum::pointCount; n++) {
                     simpleFrustum.origins[n] = tileDst.pointOrigin[n];
                     simpleFrustum.directions[n] = tileDst.pointDir[n];
                 }
@@ -283,7 +335,7 @@ void Raycaster::transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesS
                         simpleFrustum.origins[i] = vector3(INFINITY, INFINITY, INFINITY);
                         simpleFrustum.directions[i] = vector3(0, 0, 0);
                     }
-                    tileDst = simpleFrustum;
+                    tileDst = Frustum(simpleFrustum.origins, simpleFrustum.directions);
                 }
             }
         }
@@ -303,9 +355,9 @@ void Raycaster::transformHierarchyCameraToWorld(const RayPacketFrustum3D* tilesS
         uint32_t startBlock = min(blockCount, i * blocksPerThread);
         uint32_t endBlock = min(blockCount, (i + 1) * blocksPerThread);
         if (mustCull) {
-            taskResults[i] = _threadPool->addTask(blockTransformAndCullTask, startBlock, endBlock);
+            taskResults[i] = threadPool.addTask(blockTransformAndCullTask, startBlock, endBlock);
         } else {
-            taskResults[i] = _threadPool->addTask(blockTransformTask, startBlock, endBlock);
+            taskResults[i] = threadPool.addTask(blockTransformTask, startBlock, endBlock);
         }
     }
     for (uint32_t i = 0; i < numTasks; ++i) {
@@ -381,7 +433,7 @@ void Raycaster::intersectAndResolveBeamBatch(std::unique_ptr<Camera>& camera,
 
         transformHierarchyCameraToWorld(batch.tileFrusta3D.data(), batch.blockFrusta3D.data(), cHier._tileFrusta.data(),
                                         cHier._blockFrusta.data(), batchToWorld, uint32_t(batch.blockFrusta3D.size()),
-                                        streamed, cullPlanes);
+                                        streamed, cullPlanes, *_threadPool.get());
 
         RayHierarchy rayHierachy;
         rayHierachy.blockFrusta = cHier._blockFrusta;

@@ -47,8 +47,8 @@ SampleData::SampleData(const Sample* rawSamples,
     cullRect.upper.x = INFINITY;
     cullRect.upper.y = INFINITY;
     validSampleCount = uint32_t(rawSampleCount);
-    samples.blockFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount);
-    samples.tileFrusta3D = DynamicArray<RayPacketFrustum3D>(blockCount * TILES_PER_BLOCK);
+    samples.blockFrusta3D = DynamicArray<Frustum>(blockCount);
+    samples.tileFrusta3D = DynamicArray<Frustum>(blockCount * TILES_PER_BLOCK);
     samples.directionalBeams = DynamicArray<DirectionalBeam>(blockCount * BLOCK_SIZE);
 
     samples2D = BeamBatch2D(sortedSamples, blockCount, validSampleCount, cullRect, settings2DTo3D.thinLens,
@@ -145,10 +145,10 @@ void Camera::setSampleData(const SampleData& sampleData) {
     uint32_t tileCount = uint32_t(sampleData.samples.tileFrusta3D.size());
 
     if (blockCount != _cpuHierarchy._blockFrusta.size()) {
-        _cpuHierarchy._blockFrusta = DynamicArray<RayPacketFrustum3D>(blockCount);
+        _cpuHierarchy._blockFrusta = DynamicArray<Frustum>(blockCount);
     }
     if (tileCount != _cpuHierarchy._tileFrusta.size()) {
-        _cpuHierarchy._tileFrusta = DynamicArray<RayPacketFrustum3D>(tileCount);
+        _cpuHierarchy._tileFrusta = DynamicArray<Frustum>(tileCount);
     }
     const DynamicArray<DirectionalBeam>& samples = sampleData.samples.directionalBeams;
     _gpuCamera->updateConfig(_outputFormat, sampleData.imageLocationToSampleIndex.data(), samples.data(), _lens,
