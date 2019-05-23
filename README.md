@@ -74,4 +74,4 @@ Benchmarking vs other raytracers:
 See the CONTRIBUTING file for how to help out.
 
 ## License
-HVVR is BSD-licensed. We also provide an additional patent grant.
+HVVR is BSD-licensed.
