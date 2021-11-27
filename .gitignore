@@ -38,3 +38,6 @@ x64
 
 # scene data files
 libraries/hvvr/samples_shared/data/scenes/*
+
+# CUDA compilation logs
+**/*.tlog

@@ -33,7 +33,7 @@ void ComputeEyeSpaceFrusta(const GPUBuffer<DirectionalBeam>& dirSamples,
     const bool checkFrustaAccuracy = false;
     const bool printStats = false;
 
-    auto generateFrusta = [](DynamicArray<SimpleRayFrustum>& frusta, unsigned int frustaSampleCount,
+    auto generateFrusta = [&checkFrustaAccuracy, &printStats](DynamicArray<SimpleRayFrustum>& frusta, unsigned int frustaSampleCount,
                              const DynamicArray<DirectionalBeam>& samples, float slopFactor, int numOrientationsToTry) {
         auto toDir = [](const matrix3x3& rot, float u, float v) { return rot * normalize(vector3(u, v, 1.0f)); };
         for (int i = 0; i < frusta.size(); ++i) {

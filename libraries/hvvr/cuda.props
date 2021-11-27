@@ -12,9 +12,9 @@
   </ItemDefinitionGroup>
   <ItemGroup />
   <ImportGroup Label="ExtensionSettings">
-    <Import Project="$(VCTargetsPath14)\BuildCustomizations\CUDA 9.1.props" />
+    <Import Project="$(VCTargetsPath14)\BuildCustomizations\CUDA 11.5.props" />
   </ImportGroup>
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="$(VCTargetsPath14)\BuildCustomizations\CUDA 9.1.targets" />
+    <Import Project="$(VCTargetsPath14)\BuildCustomizations\CUDA 11.5.targets" />
   </ImportGroup>
 </Project>

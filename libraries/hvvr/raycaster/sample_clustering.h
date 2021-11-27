@@ -11,6 +11,7 @@
 #include "dynamic_array.h"
 #include "magic_constants.h"
 #include "samples.h"
+#include <algorithm>
 
 namespace hvvr {
 

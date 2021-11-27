@@ -18,6 +18,7 @@
 #include "vector_math.h"
 #include "warp_ops.h"
 #include "dynamic_array.h"
+#include <algorithm>
 
 
 namespace hvvr {

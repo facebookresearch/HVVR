@@ -47,12 +47,12 @@
     <ProjectGuid>{b82ca628-eb82-41a6-bff2-9da5fca895bb}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>modelconvert</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.20348.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
@@ -65,7 +65,7 @@
     <Import Project="..\..\..\libraries\hvvr\hvvr_common.props" />
     <Import Project="..\..\..\libraries\hvvr\shared\shared.props" />
     <Import Project="..\..\..\libraries\hvvr\samples_shared\samples_shared.props" />
-	<Import Project="..\..\..\libraries\hvvr\raycaster\raycaster.props" />
+    <Import Project="..\..\..\libraries\hvvr\raycaster\raycaster.props" />
   </ImportGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
